@@ -5,6 +5,7 @@ function Achievements({ goBack, userId }) {
   const [stats, setStats] = useState({
     totalGames: 0,
     bestScore: 0,
+    totalPoints: 0,
     bestLevel: 0,
     averageScore: 0,
     totalWeeklyGold: 0,
@@ -13,6 +14,8 @@ function Achievements({ goBack, userId }) {
     totalMonthlyGold: 0,
     totalMonthlySilver: 0,
     totalMonthlyBronze: 0,
+    winRate: 0,
+    totalWords: 0,
   });
   const [loading, setLoading] = useState(true);
   const [medalHistory, setMedalHistory] = useState([]);
@@ -29,14 +32,17 @@ function Achievements({ goBack, userId }) {
       const { data: sessions } = await supabase
         .from("sessions")
         .select("*")
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
 
       if (sessions && sessions.length > 0) {
         const bestScore = Math.max(...sessions.map((s) => s.score || 0));
         const bestLevel = Math.max(...sessions.map((s) => s.level || 0));
-        const avgScore = Math.round(
-          sessions.reduce((sum, s) => sum + (s.score || 0), 0) / sessions.length
-        );
+        const totalPoints = sessions.reduce((sum, s) => sum + (s.score || 0), 0);
+        const avgScore = Math.round(totalPoints / sessions.length);
+        const totalWords = sessions.reduce((sum, s) => sum + (s.total_words || 0), 0);
+        const correctWords = sessions.reduce((sum, s) => sum + (s.correct_answers || 0), 0);
+        const winRate = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 0;
 
         const { data: weeklyMedals } = await supabase
           .from("weekly_medals")
@@ -69,14 +75,12 @@ function Achievements({ goBack, userId }) {
             ...m,
             type: "monthly",
           })),
-        ].sort(
-          (a, b) =>
-            new Date(b.created_at) - new Date(a.created_at)
-        );
+        ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         setStats({
           totalGames: sessions.length,
           bestScore,
+          totalPoints,
           bestLevel,
           averageScore: avgScore,
           totalWeeklyGold: weeklyCount.gold,
@@ -85,6 +89,8 @@ function Achievements({ goBack, userId }) {
           totalMonthlyGold: monthlyCount.gold,
           totalMonthlySilver: monthlyCount.silver,
           totalMonthlyBronze: monthlyCount.bronze,
+          winRate,
+          totalWords,
         });
 
         setMedalHistory(allMedals);
@@ -119,127 +125,155 @@ function Achievements({ goBack, userId }) {
     container: {
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "40px 20px",
+      padding: "16px 16px 40px 16px",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      paddingTop: "60px",
     },
     header: {
       textAlign: "center",
       color: "white",
-      marginBottom: "40px",
+      marginBottom: "24px",
     },
     title: {
-      fontSize: "48px",
+      fontSize: "clamp(28px, 7vw, 48px)",
       fontWeight: "bold",
-      margin: "0 0 10px 0",
+      margin: "0 0 8px 0",
       textShadow: "0 2px 10px rgba(0,0,0,0.3)",
     },
     subtitle: {
-      fontSize: "16px",
+      fontSize: "clamp(13px, 3vw, 16px)",
       color: "#06b6d4",
       margin: "0",
+    },
+    backButtonTop: {
+      position: "fixed",
+      top: "16px",
+      right: "16px",
+      padding: "10px 16px",
+      backgroundColor: "rgba(255,255,255,0.1)",
+      color: "white",
+      border: "1px solid #06b6d4",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontSize: "clamp(12px, 2.5vw, 14px)",
+      fontWeight: "600",
+      transition: "all 0.3s ease",
+      zIndex: 1000,
+      backdropFilter: "blur(10px)",
     },
     contentContainer: {
       maxWidth: "900px",
       margin: "0 auto",
     },
     section: {
-      marginBottom: "40px",
+      marginBottom: "28px",
     },
     sectionTitle: {
-      fontSize: "24px",
+      fontSize: "clamp(18px, 4vw, 24px)",
       fontWeight: "700",
       color: "#06b6d4",
-      margin: "0 0 20px 0",
+      margin: "0 0 16px 0",
       textTransform: "uppercase",
       letterSpacing: "1px",
       borderBottom: "2px solid rgba(6,182,212,0.3)",
-      paddingBottom: "10px",
+      paddingBottom: "8px",
     },
     statGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      gap: "16px",
-      marginBottom: "30px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+      gap: "12px",
+      marginBottom: "24px",
     },
     statCard: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
       borderRadius: "12px",
-      padding: "24px",
+      padding: "16px",
       textAlign: "center",
       color: "white",
       boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
       transition: "all 0.3s ease",
     },
+    statCardHighlight: {
+      background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)",
+      borderColor: "rgba(251, 191, 36, 0.5)",
+    },
     statValue: {
-      fontSize: "36px",
+      fontSize: "clamp(24px, 5vw, 36px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      margin: "0 0 8px 0",
+      margin: "0 0 6px 0",
+    },
+    statValueHighlight: {
+      color: "#78350f",
     },
     statLabel: {
-      fontSize: "13px",
+      fontSize: "clamp(11px, 2.5vw, 13px)",
       color: "#bfdbfe",
       margin: "0",
       textTransform: "uppercase",
       fontWeight: "600",
       letterSpacing: "0.5px",
     },
+    statLabelHighlight: {
+      color: "#78350f",
+    },
     medalGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-      gap: "12px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+      gap: "10px",
     },
     medalCard: {
       background: "rgba(6,182,212,0.1)",
       border: "2px solid rgba(6,182,212,0.3)",
       borderRadius: "8px",
-      padding: "16px",
+      padding: "12px",
       textAlign: "center",
       color: "white",
+      transition: "all 0.3s ease",
     },
     medalType: {
-      fontSize: "12px",
+      fontSize: "clamp(10px, 2vw, 12px)",
       color: "#06b6d4",
       fontWeight: "600",
       textTransform: "uppercase",
-      marginBottom: "8px",
+      marginBottom: "6px",
     },
     medalContent: {
       display: "flex",
       justifyContent: "center",
       alignItems: "center",
-      gap: "8px",
-      fontSize: "24px",
-      marginBottom: "8px",
+      gap: "6px",
+      fontSize: "clamp(18px, 4vw, 24px)",
+      marginBottom: "6px",
     },
     medalCount: {
-      fontSize: "20px",
+      fontSize: "clamp(16px, 3vw, 20px)",
       fontWeight: "bold",
       color: "#fbbf24",
     },
     medalLabel: {
-      fontSize: "12px",
+      fontSize: "clamp(10px, 2vw, 12px)",
       color: "#bfdbfe",
       margin: "0",
     },
     medalHistory: {
       display: "flex",
       flexDirection: "column",
-      gap: "12px",
+      gap: "10px",
     },
     medalHistoryItem: {
       background: "rgba(6,182,212,0.1)",
       border: "1px solid rgba(6,182,212,0.2)",
       borderRadius: "8px",
-      padding: "16px",
+      padding: "12px",
       display: "flex",
       alignItems: "center",
-      gap: "12px",
+      gap: "10px",
       color: "white",
     },
     medalHistoryEmoji: {
-      fontSize: "28px",
+      fontSize: "clamp(20px, 5vw, 28px)",
       minWidth: "40px",
       textAlign: "center",
     },
@@ -247,36 +281,22 @@ function Achievements({ goBack, userId }) {
       flex: 1,
     },
     medalHistoryType: {
-      fontSize: "14px",
+      fontSize: "clamp(12px, 2.5vw, 14px)",
       fontWeight: "600",
       color: "#06b6d4",
-      margin: "0 0 4px 0",
+      margin: "0 0 2px 0",
       textTransform: "uppercase",
     },
     medalHistoryDate: {
-      fontSize: "12px",
+      fontSize: "clamp(10px, 2vw, 12px)",
       color: "#bfdbfe",
       margin: "0",
-    },
-    backButton: {
-      display: "inline-block",
-      marginTop: "40px",
-      padding: "12px 24px",
-      backgroundColor: "rgba(255,255,255,0.1)",
-      color: "white",
-      border: "1px solid #06b6d4",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: "600",
-      transition: "all 0.3s ease",
-      textAlign: "center",
     },
     emptyState: {
       textAlign: "center",
       color: "#06b6d4",
-      padding: "40px 20px",
-      fontSize: "16px",
+      padding: "30px 16px",
+      fontSize: "clamp(13px, 3vw, 16px)",
     },
   };
 
@@ -293,6 +313,21 @@ function Achievements({ goBack, userId }) {
 
   return (
     <div style={styles.container}>
+      <button
+        style={styles.backButtonTop}
+        onClick={goBack}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(6, 182, 212, 0.2)";
+          e.currentTarget.style.transform = "scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+          e.currentTarget.style.transform = "scale(1)";
+        }}
+      >
+        ← Menu
+      </button>
+
       <div style={styles.header}>
         <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
         <p style={styles.subtitle}>Your Gaming Journey</p>
@@ -303,6 +338,7 @@ function Achievements({ goBack, userId }) {
           <div style={styles.emptyState}>Loading achievements...</div>
         ) : (
           <>
+            {/* STATISTICS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>📊 Your Statistics</h2>
               <div style={styles.statGrid}>
@@ -310,10 +346,16 @@ function Achievements({ goBack, userId }) {
                   <p style={styles.statValue}>{stats.totalGames}</p>
                   <p style={styles.statLabel}>Games Played</p>
                 </div>
-                <div style={styles.statCard}>
-                  <p style={styles.statValue}>
-                    {stats.bestScore.toLocaleString()}
+                <div style={{ ...styles.statCard, ...styles.statCardHighlight }}>
+                  <p style={{ ...styles.statValue, ...styles.statValueHighlight }}>
+                    {stats.totalPoints.toLocaleString()}
                   </p>
+                  <p style={{ ...styles.statLabel, ...styles.statLabelHighlight }}>
+                    Total Points
+                  </p>
+                </div>
+                <div style={styles.statCard}>
+                  <p style={styles.statValue}>{stats.bestScore.toLocaleString()}</p>
                   <p style={styles.statLabel}>Best Score</p>
                 </div>
                 <div style={styles.statCard}>
@@ -321,14 +363,21 @@ function Achievements({ goBack, userId }) {
                   <p style={styles.statLabel}>Best Level</p>
                 </div>
                 <div style={styles.statCard}>
-                  <p style={styles.statValue}>
-                    {stats.averageScore.toLocaleString()}
-                  </p>
-                  <p style={styles.statLabel}>Average Score</p>
+                  <p style={styles.statValue}>{stats.averageScore.toLocaleString()}</p>
+                  <p style={styles.statLabel}>Avg Score</p>
+                </div>
+                <div style={styles.statCard}>
+                  <p style={styles.statValue}>{stats.winRate}%</p>
+                  <p style={styles.statLabel}>Accuracy</p>
+                </div>
+                <div style={styles.statCard}>
+                  <p style={styles.statValue}>{stats.totalWords}</p>
+                  <p style={styles.statLabel}>Words Learned</p>
                 </div>
               </div>
             </div>
 
+            {/* MEDALS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>🥇 Medals Earned</h2>
               <div style={styles.medalGrid}>
@@ -400,6 +449,7 @@ function Achievements({ goBack, userId }) {
               </div>
             </div>
 
+            {/* MEDAL TIMELINE */}
             {medalHistory.length > 0 && (
               <div style={styles.section}>
                 <h2 style={styles.sectionTitle}>📅 Medal Timeline</h2>
@@ -437,12 +487,6 @@ function Achievements({ goBack, userId }) {
             )}
           </>
         )}
-      </div>
-
-      <div style={{ textAlign: "center" }}>
-        <button style={styles.backButton} onClick={goBack}>
-          ← Back to Menu
-        </button>
       </div>
     </div>
   );
