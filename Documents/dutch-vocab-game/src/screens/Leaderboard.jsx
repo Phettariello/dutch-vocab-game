@@ -114,7 +114,7 @@ function Leaderboard({ onUserClick, goBack }) {
       // Fetch usernames for all users
       const userIds = leaderboardData.map(entry => entry.user_id);
       const { data: profilesData } = await supabase
-        .from("user_profile")
+        .from("profile")
         .select("user_id, username")
         .in("user_id", userIds);
 
