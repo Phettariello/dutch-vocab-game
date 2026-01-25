@@ -4,6 +4,10 @@ import { supabase } from "../supabaseClient";
 function YourWords({ goBack }) {
   const [words, setWords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedDifficulty, setSelectedDifficulty] = useState("all");
+  const [categories, setCategories] = useState([]);
+  const [filteredWords, setFilteredWords] = useState([]);
 
   useEffect(() => {
     const fetchWords = async () => {
@@ -39,7 +43,14 @@ function YourWords({ goBack }) {
 
         withPercentage.sort((a, b) => b.errorPercentage - a.errorPercentage);
 
+        // Estrai categorie uniche
+        const uniqueCategories = [
+          ...new Set(withPercentage.map((p) => p.words.category)),
+        ].sort();
+        setCategories(uniqueCategories);
+
         setWords(withPercentage);
+        setFilteredWords(withPercentage);
       } catch (error) {
         console.error("Error fetching words:", error);
         alert("Failed to load words.");
@@ -51,229 +62,421 @@ function YourWords({ goBack }) {
     fetchWords();
   }, []);
 
+  // Filtra parole quando cambiano i filtri
+  useEffect(() => {
+    let filtered = words;
+
+    if (selectedCategory !== "all") {
+      filtered = filtered.filter((w) => w.words.category === selectedCategory);
+    }
+
+    if (selectedDifficulty !== "all") {
+      const diff = parseInt(selectedDifficulty);
+      filtered = filtered.filter((w) => w.words.difficulty === diff);
+    }
+
+    setFilteredWords(filtered);
+  }, [selectedCategory, selectedDifficulty, words]);
+
+  const stats = {
+    total: words.length,
+    mastered: words.filter((w) => w.mastered).length,
+    learning: words.filter((w) => !w.mastered).length,
+  };
+
+  const styles = {
+    container: {
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+      padding: "20px",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    },
+    header: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: "30px",
+      position: "sticky",
+      top: 0,
+      zIndex: 100,
+      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+      padding: "20px 0",
+    },
+    title: {
+      fontSize: "36px",
+      fontWeight: "800",
+      margin: 0,
+      color: "white",
+      textShadow: "0 2px 10px rgba(6,182,212,0.4)",
+    },
+    backButton: {
+      padding: "12px 24px",
+      backgroundColor: "#06b6d4",
+      color: "#0f172a",
+      border: "none",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "600",
+      transition: "all 0.3s ease",
+    },
+    statsContainer: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+      gap: "16px",
+      marginBottom: "30px",
+      maxWidth: "1000px",
+      margin: "0 auto 30px",
+    },
+    statCard: {
+      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+      border: "1px solid rgba(6,182,212,0.2)",
+      borderRadius: "12px",
+      padding: "20px",
+      textAlign: "center",
+      color: "white",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+    },
+    statValue: {
+      fontSize: "32px",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      margin: "0 0 8px 0",
+    },
+    statLabel: {
+      fontSize: "12px",
+      color: "#bfdbfe",
+      margin: 0,
+      textTransform: "uppercase",
+      fontWeight: "600",
+    },
+    filterContainer: {
+      maxWidth: "1000px",
+      margin: "0 auto 30px",
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+      gap: "16px",
+    },
+    filterGroup: {
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+    },
+    filterLabel: {
+      color: "#06b6d4",
+      fontWeight: "700",
+      fontSize: "13px",
+      textTransform: "uppercase",
+    },
+    filterSelect: {
+      padding: "10px 12px",
+      borderRadius: "8px",
+      border: "1px solid rgba(6,182,212,0.3)",
+      background: "rgba(30, 58, 138, 0.8)",
+      color: "white",
+      fontSize: "14px",
+      cursor: "pointer",
+      transition: "all 0.3s ease",
+    },
+    contentContainer: {
+      maxWidth: "1000px",
+      margin: "0 auto",
+    },
+    cardsGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+      gap: "16px",
+      marginBottom: "40px",
+    },
+    card: {
+      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+      border: "1px solid rgba(6,182,212,0.2)",
+      borderRadius: "12px",
+      padding: "20px",
+      color: "white",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+      transition: "all 0.3s ease",
+      cursor: "pointer",
+    },
+    cardHeader: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "start",
+      marginBottom: "12px",
+      gap: "12px",
+    },
+    cardTitle: {
+      fontSize: "18px",
+      fontWeight: "700",
+      margin: "0 0 4px 0",
+      color: "#f0f9ff",
+    },
+    cardSubtitle: {
+      fontSize: "14px",
+      color: "#bfdbfe",
+      margin: 0,
+      fontWeight: "500",
+    },
+    errorBadge: {
+      backgroundColor: "#ef4444",
+      color: "white",
+      padding: "8px 16px",
+      borderRadius: "8px",
+      fontWeight: "bold",
+      fontSize: "14px",
+      minWidth: "80px",
+      textAlign: "center",
+    },
+    warningBadge: {
+      backgroundColor: "#f97316",
+      color: "white",
+      padding: "8px 16px",
+      borderRadius: "8px",
+      fontWeight: "bold",
+      fontSize: "14px",
+      minWidth: "80px",
+      textAlign: "center",
+    },
+    successBadge: {
+      backgroundColor: "#22c55e",
+      color: "white",
+      padding: "8px 16px",
+      borderRadius: "8px",
+      fontWeight: "bold",
+      fontSize: "14px",
+      minWidth: "80px",
+      textAlign: "center",
+    },
+    cardStats: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: "8px",
+      marginBottom: "12px",
+      fontSize: "12px",
+    },
+    statItem: {
+      background: "rgba(255,255,255,0.1)",
+      padding: "8px",
+      borderRadius: "6px",
+      textAlign: "center",
+      color: "#bfdbfe",
+    },
+    cardMeta: {
+      display: "flex",
+      gap: "12px",
+      fontSize: "12px",
+      color: "#bfdbfe",
+      borderTop: "1px solid rgba(6,182,212,0.2)",
+      paddingTop: "12px",
+      marginTop: "12px",
+    },
+    emptyState: {
+      textAlign: "center",
+      color: "#06b6d4",
+      padding: "40px 20px",
+      fontSize: "16px",
+    },
+    loadingState: {
+      textAlign: "center",
+      color: "#06b6d4",
+      padding: "40px 20px",
+      fontSize: "16px",
+    },
+  };
+
   if (loading) {
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
-        <h1>Loading...</h1>
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>📖 YOUR WORDS</h1>
+          <button style={styles.backButton} onClick={goBack}>
+            ← Back
+          </button>
+        </div>
+        <div style={styles.loadingState}>Loading your words...</div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "50px", maxWidth: "1000px", margin: "0 auto" }}>
-      <h1>📖 Your Words</h1>
-      <p style={{ fontSize: "16px", color: "#666", marginBottom: "20px" }}>
-        Total words: <strong>{words.length}</strong> | Ordered by error rate
-      </p>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <h1 style={styles.title}>📖 YOUR WORDS</h1>
+        <button
+          style={styles.backButton}
+          onClick={goBack}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Back to Menu
+        </button>
+      </div>
 
-      {words.length === 0 ? (
-        <p style={{ fontSize: "18px", color: "#666" }}>
-          No words encountered yet! Start playing to see your statistics.
-        </p>
-      ) : (
-        <div>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              marginBottom: "20px",
-            }}
+      {/* Stats */}
+      <div style={styles.statsContainer}>
+        <div style={styles.statCard}>
+          <p style={styles.statValue}>{stats.total}</p>
+          <p style={styles.statLabel}>Total Words</p>
+        </div>
+        <div style={styles.statCard}>
+          <p style={styles.statValue}>{stats.mastered}</p>
+          <p style={styles.statLabel}>✅ Mastered</p>
+        </div>
+        <div style={styles.statCard}>
+          <p style={styles.statValue}>{stats.learning}</p>
+          <p style={styles.statLabel}>⚠️ Learning</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={styles.filterContainer}>
+        <div style={styles.filterGroup}>
+          <label style={styles.filterLabel}>Category</label>
+          <select
+            style={styles.filterSelect}
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
           >
-            <thead>
-              <tr style={{ backgroundColor: "#f0f0f0", borderBottom: "2px solid #ddd" }}>
-                <th style={{ padding: "12px", textAlign: "left" }}>#</th>
-                <th style={{ padding: "12px", textAlign: "left" }}>English</th>
-                <th style={{ padding: "12px", textAlign: "left" }}>Dutch</th>
-                <th style={{ padding: "12px", textAlign: "center" }}>✅ Correct</th>
-                <th style={{ padding: "12px", textAlign: "center" }}>❌ Incorrect</th>
-                <th style={{ padding: "12px", textAlign: "center" }}>Error %</th>
-                <th style={{ padding: "12px", textAlign: "center" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {words.map((progress, index) => {
-                const errorColor =
-                  progress.errorPercentage > 50
-                    ? "#ff6b6b"
-                    : progress.errorPercentage > 25
-                    ? "#ffa500"
-                    : "#4CAF50";
+            <option value="all">All Categories</option>
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <label style={styles.filterLabel}>Difficulty</label>
+          <select
+            style={styles.filterSelect}
+            value={selectedDifficulty}
+            onChange={(e) => setSelectedDifficulty(e.target.value)}
+          >
+            <option value="all">All Levels</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+              <option key={level} value={level}>
+                Level {level}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div style={styles.contentContainer}>
+        {filteredWords.length === 0 ? (
+          <div style={styles.emptyState}>
+            No words found with the selected filters. Try adjusting your selection!
+          </div>
+        ) : (
+          <>
+            <div style={styles.cardsGrid}>
+              {filteredWords.map((progress, index) => {
+                let badge;
+                if (progress.mastered) {
+                  badge = styles.successBadge;
+                } else if (progress.errorPercentage > 50) {
+                  badge = styles.errorBadge;
+                } else {
+                  badge = styles.warningBadge;
+                }
 
                 return (
-                  <tr
+                  <div
                     key={progress.id}
-                    style={{
-                      borderBottom: "1px solid #eee",
-                      backgroundColor: index % 2 === 0 ? "#fafafa" : "white",
+                    style={styles.card}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-4px)";
+                      e.currentTarget.style.boxShadow =
+                        "0 8px 25px rgba(6,182,212,0.3)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "none";
+                      e.currentTarget.style.boxShadow =
+                        "0 4px 15px rgba(0,0,0,0.2)";
                     }}
                   >
-                    <td style={{ padding: "12px" }}>{index + 1}</td>
-                    <td style={{ padding: "12px" }}>
-                      <strong>{progress.words.english}</strong>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      {progress.words.dutch}
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center" }}>
-                      <span
+                    <div style={styles.cardHeader}>
+                      <div style={{ flex: 1 }}>
+                        <h3 style={styles.cardTitle}>
+                          {progress.words.english}
+                        </h3>
+                        <p style={styles.cardSubtitle}>
+                          {progress.words.dutch}
+                        </p>
+                      </div>
+                      <div style={badge}>
+                        {progress.mastered ? (
+                          "✅ MASTERED"
+                        ) : (
+                          `${progress.errorPercentage.toFixed(0)}%`
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={styles.cardStats}>
+                      <div style={styles.statItem}>
+                        ✅ {progress.correct_count}
+                      </div>
+                      <div style={styles.statItem}>
+                        ❌ {progress.incorrect_count}
+                      </div>
+                      <div style={styles.statItem}>
+                        Total: {progress.total}
+                      </div>
+                    </div>
+
+                    <div style={styles.cardMeta}>
+                      <span>📁 {progress.words.category}</span>
+                      <span>📊 Level {progress.words.difficulty}/10</span>
+                    </div>
+
+                    {progress.words.example_nl && (
+                      <div
                         style={{
-                          backgroundColor: "#e8f5e9",
-                          padding: "4px 8px",
-                          borderRadius: "4px",
-                          fontWeight: "bold",
-                          color: "#2e7d32",
+                          background: "rgba(255,255,255,0.05)",
+                          padding: "10px",
+                          borderRadius: "6px",
+                          marginTop: "12px",
+                          fontSize: "12px",
+                          lineHeight: "1.4",
+                          borderLeft: "3px solid #06b6d4",
                         }}
                       >
-                        {progress.correct_count}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center" }}>
-                      <span
-                        style={{
-                          backgroundColor: "#ffebee",
-                          padding: "4px 8px",
-                          borderRadius: "4px",
-                          fontWeight: "bold",
-                          color: "#c62828",
-                        }}
-                      >
-                        {progress.incorrect_count}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center" }}>
-                      <span
-                        style={{
-                          backgroundColor: errorColor,
-                          color: "white",
-                          padding: "4px 12px",
-                          borderRadius: "4px",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {progress.errorPercentage.toFixed(0)}%
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center" }}>
-                      {progress.mastered ? (
-                        <span style={{ color: "#4CAF50", fontWeight: "bold" }}>
-                          ✅ Mastered
-                        </span>
-                      ) : (
-                        <span style={{ color: "#FF9800", fontWeight: "bold" }}>
-                          ⚠️ Learning
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          <div style={{ marginTop: "40px" }}>
-            <h2>Detailed View</h2>
-            {words.slice(0, 10).map((progress, index) => (
-              <div
-                key={progress.id}
-                style={{
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  padding: "15px",
-                  marginBottom: "15px",
-                  backgroundColor: progress.errorPercentage > 50 ? "#ffebee" : "#f9f9f9",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "start",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <div>
-                    <h3 style={{ margin: "0 0 5px 0" }}>
-                      {index + 1}. {progress.words.english}
-                    </h3>
-                    <p style={{ margin: "5px 0", fontSize: "16px", color: "#333" }}>
-                      Dutch: <strong>{progress.words.dutch}</strong>
-                    </p>
-                  </div>
-                  <div
-                    style={{
-                      backgroundColor:
-                        progress.errorPercentage > 50
-                          ? "#ff6b6b"
-                          : progress.errorPercentage > 25
-                          ? "#ffa500"
-                          : "#4CAF50",
-                      color: "white",
-                      padding: "12px 20px",
-                      borderRadius: "5px",
-                      textAlign: "center",
-                      minWidth: "120px",
-                    }}
-                  >
-                    <p style={{ margin: "0", fontSize: "24px", fontWeight: "bold" }}>
-                      {progress.errorPercentage.toFixed(0)}%
-                    </p>
-                    <p style={{ margin: "5px 0 0 0", fontSize: "12px" }}>Error Rate</p>
-                  </div>
-                </div>
-
-                <div style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>
-                  <p style={{ margin: "3px 0" }}>
-                    Category: <strong>{progress.words.category}</strong> | Difficulty:{" "}
-                    <strong>{progress.words.difficulty}/10</strong>
-                  </p>
-                  <p style={{ margin: "3px 0" }}>
-                    ✅ Correct: <strong>{progress.correct_count}</strong> | ❌ Incorrect:{" "}
-                    <strong>{progress.incorrect_count}</strong> | Total: <strong>{progress.total}</strong>
-                  </p>
-                  <p style={{ margin: "3px 0" }}>
-                    Status: {progress.mastered ? "✅ MASTERED" : `⚠️ ${progress.correct_count}/10 to master`}
-                  </p>
-                </div>
-
-                {progress.words.example_nl && (
-                  <div
-                    style={{
-                      backgroundColor: "#f5f5f5",
-                      padding: "10px",
-                      borderRadius: "5px",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <p style={{ margin: "3px 0", fontStyle: "italic" }}>
-                      <strong>Dutch:</strong> {progress.words.example_nl}
-                    </p>
-                    {progress.words.example_en && (
-                      <p style={{ margin: "3px 0", color: "#666" }}>
-                        <strong>English:</strong> {progress.words.example_en}
-                      </p>
+                        <p style={{ margin: "0 0 4px 0" }}>
+                          <strong>NL:</strong> {progress.words.example_nl}
+                        </p>
+                        {progress.words.example_en && (
+                          <p style={{ margin: 0, color: "#bfdbfe" }}>
+                            <strong>EN:</strong> {progress.words.example_en}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                );
+              })}
+            </div>
 
-      <button
-        onClick={goBack}
-        style={{
-          marginTop: "30px",
-          padding: "10px 20px",
-          backgroundColor: "#2196F3",
-          color: "white",
-          border: "none",
-          borderRadius: "5px",
-          cursor: "pointer",
-        }}
-      >
-        Back to Menu
-      </button>
+            <div
+              style={{
+                textAlign: "center",
+                color: "#bfdbfe",
+                marginBottom: "20px",
+                fontSize: "14px",
+              }}
+            >
+              Showing {filteredWords.length} of {stats.total} words
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
