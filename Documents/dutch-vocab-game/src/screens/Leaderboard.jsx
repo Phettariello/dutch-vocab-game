@@ -6,17 +6,18 @@ function Leaderboard({ onUserClick, goBack }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [medals, setMedals] = useState({});
+  const [usernames, setUsernames] = useState({});
 
   useEffect(() => {
     // Fetch immediatamente quando il tab cambia
     fetchLeaderboard();
     fetchMedals();
 
-    // Auto-refresh ogni 3 secondi
+    // Auto-refresh ogni 10 secondi (meno invasivo)
     const interval = setInterval(() => {
       fetchLeaderboard();
       fetchMedals();
-    }, 3000);
+    }, 30000);
 
     // Refresh quando la pagina diventa visibile (user torna dal Play)
     const handleVisibilityChange = () => {
@@ -109,6 +110,19 @@ function Leaderboard({ onUserClick, goBack }) {
       const leaderboardData = Object.values(userStats)
         .sort((a, b) => b.totalScore - a.totalScore)
         .slice(0, 10);
+
+      // Fetch usernames for all users
+      const userIds = leaderboardData.map(entry => entry.user_id);
+      const { data: profilesData } = await supabase
+        .from("user_profile")
+        .select("user_id, username")
+        .in("user_id", userIds);
+
+      const usernamesMap = {};
+      profilesData?.forEach((profile) => {
+        usernamesMap[profile.user_id] = profile.username;
+      });
+      setUsernames(usernamesMap);
 
       console.log("Leaderboard data:", leaderboardData);
       setLeaderboard(leaderboardData);
@@ -323,6 +337,7 @@ function Leaderboard({ onUserClick, goBack }) {
               silver: 0,
               bronze: 0,
             };
+            const username = usernames[entry.user_id] || `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
 
             return (
               <div
@@ -331,7 +346,7 @@ function Leaderboard({ onUserClick, goBack }) {
                 onClick={() =>
                   onUserClick(
                     entry.user_id,
-                    `Player ${entry.user_id.slice(0, 8)}`
+                    username
                   )
                 }
                 onMouseEnter={(e) => {
@@ -349,7 +364,7 @@ function Leaderboard({ onUserClick, goBack }) {
 
                 <div style={styles.userInfo}>
                   <h3 style={styles.username}>
-                    Player {entry.user_id.slice(0, 8).toUpperCase()}
+                    {username}
                   </h3>
                   <p style={styles.stats}>
                     <span>📊 Score: {entry.totalScore?.toLocaleString()}</span>
