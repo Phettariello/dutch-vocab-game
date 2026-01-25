@@ -18,7 +18,9 @@ function Achievements({ goBack, userId }) {
   const [medalHistory, setMedalHistory] = useState([]);
 
   useEffect(() => {
-    fetchAchievements();
+    if (userId) {
+      fetchAchievements();
+    }
   }, [userId]);
 
   const fetchAchievements = async () => {
@@ -278,10 +280,21 @@ function Achievements({ goBack, userId }) {
     },
   };
 
+  if (!userId) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
+        </div>
+        <div style={styles.emptyState}>Loading achievements...</div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>🏆 MY ACHIEVEMENTS</h1>
+        <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
         <p style={styles.subtitle}>Your Gaming Journey</p>
       </div>
 

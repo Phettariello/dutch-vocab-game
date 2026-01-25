@@ -17,7 +17,7 @@ function Leaderboard({ onUserClick, goBack }) {
     const interval = setInterval(() => {
       fetchLeaderboard();
       fetchMedals();
-    }, 30000);
+    }, 10000);
 
     // Refresh quando la pagina diventa visibile (user torna dal Play)
     const handleVisibilityChange = () => {
@@ -111,10 +111,10 @@ function Leaderboard({ onUserClick, goBack }) {
         .sort((a, b) => b.totalScore - a.totalScore)
         .slice(0, 10);
 
-      // Fetch usernames for all users
+      // Fetch usernames for all users from PROFILES table
       const userIds = leaderboardData.map(entry => entry.user_id);
       const { data: profilesData } = await supabase
-        .from("profile")
+        .from("profiles")
         .select("user_id, username")
         .in("user_id", userIds);
 
