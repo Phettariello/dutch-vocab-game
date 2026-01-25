@@ -52,7 +52,7 @@ function Play({ goBack }) {
         data = allData;
       }
 
-      // Filtra parole già usate
+      // Filter out already used words
       const availableWords = data.filter((w) => !usedWordIds.has(w.id));
       const shuffled = availableWords.sort(() => Math.random() - 0.5);
 
@@ -154,7 +154,7 @@ function Play({ goBack }) {
     } else {
       newLives -= 1;
       newStreak = 0;
-      setFeedback(`❌ Wrong! It's '${currentWord.dutch}'.`);
+      setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
     }
 
     const newUsedWords = new Set(usedWordIds);
@@ -184,12 +184,10 @@ function Play({ goBack }) {
         setGameOver(true);
       }, 2000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
-      // Fine del livello, vai al prossimo
       setTimeout(() => {
         nextLevel(newScore);
       }, 2000);
     } else if (currentIndex >= words.length - 1) {
-      // Fine delle parole disponibili
       setTimeout(() => {
         nextLevel(newScore);
       }, 2000);
@@ -238,7 +236,6 @@ function Play({ goBack }) {
       const userId = userData.user.id;
       const correctCount = results.filter((r) => r.correct).length;
 
-      // Save session
       const { error: sessionError } = await supabase.from("sessions").insert([
         {
           user_id: userId,
@@ -255,7 +252,6 @@ function Play({ goBack }) {
         return;
       }
 
-      // Save progress for each unique word
       const uniqueWords = new Map();
       for (const result of results) {
         if (!uniqueWords.has(result.word)) {
@@ -323,24 +319,44 @@ function Play({ goBack }) {
     window.location.reload();
   };
 
+  // Render hearts based on lives
+  const renderHearts = () => {
+    const hearts = [];
+    for (let i = 0; i < 5; i++) {
+      hearts.push(
+        <span key={i} style={styles.heart}>
+          {i < lives ? "❤️" : "🩶"}
+        </span>
+      );
+    }
+    return hearts;
+  };
+
   if (gameOver) {
     const correctCount = allSessionResults.filter((r) => r.correct).length;
     const finalScore = totalSessionScore + score;
+    const accuracy = allSessionResults.length > 0 
+      ? Math.round((correctCount / allSessionResults.length) * 100)
+      : 0;
 
     return (
       <div style={styles.gameOverContainer}>
-        <h1 style={styles.gameOverTitle}>🎮 Partita Terminata!</h1>
+        <h1 style={styles.gameOverTitle}>🎮 Game Over!</h1>
         <div style={styles.statsContainer}>
           <div style={styles.statBox}>
-            <p style={styles.statLabel}>Punteggio Finale</p>
+            <p style={styles.statLabel}>Final Score</p>
             <p style={styles.statValue}>{finalScore}</p>
           </div>
           <div style={styles.statBox}>
-            <p style={styles.statLabel}>Livelli Completati</p>
+            <p style={styles.statLabel}>Levels Completed</p>
             <p style={styles.statValue}>{currentLevel}</p>
           </div>
           <div style={styles.statBox}>
-            <p style={styles.statLabel}>Risposte Corrette</p>
+            <p style={styles.statLabel}>Accuracy</p>
+            <p style={styles.statValue}>{accuracy}%</p>
+          </div>
+          <div style={styles.statBox}>
+            <p style={styles.statLabel}>Correct Answers</p>
             <p style={styles.statValue}>{correctCount}/{allSessionResults.length}</p>
           </div>
         </div>
@@ -359,7 +375,10 @@ function Play({ goBack }) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Partita - Livello {currentLevel}/100</h1>
+        <div style={styles.headerTop}>
+          <h1 style={styles.title}>Level {currentLevel}</h1>
+          <div style={styles.livesContainer}>{renderHearts()}</div>
+        </div>
         <div style={styles.progressBar}>
           <div
             style={{
@@ -372,21 +391,18 @@ function Play({ goBack }) {
 
       <div style={styles.stats}>
         <div style={styles.statItem}>
-          <span>📊</span> Punti: <strong>{totalSessionScore + score}</strong>
+          <span>📊</span> Score: <strong>{totalSessionScore + score}</strong>
         </div>
         <div style={styles.statItem}>
-          <span>❤️</span> Vite: <strong>{lives}/5</strong>
-        </div>
-        <div style={styles.statItem}>
-          <span>🔥</span> Serie: <strong>{streak}</strong>
+          <span>🔥</span> Streak: <strong>{streak}</strong>
         </div>
       </div>
 
       <div style={styles.questionContainer}>
         <p style={styles.questionLabel}>
-          Domanda {currentIndex + 1}/{words.length}
+          Question {questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
         </p>
-        <h2 style={styles.questionText}>Traduci in Olandese:</h2>
+        <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
       </div>
 
@@ -408,13 +424,13 @@ function Play({ goBack }) {
           type="text"
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
-          placeholder="Scrivi la traduzione..."
+          placeholder="Enter the translation..."
           style={styles.input}
           disabled={gameOver}
           autoFocus
         />
         <button type="submit" style={styles.submitButton} disabled={gameOver}>
-          Invia
+          Submit
         </button>
       </form>
 
@@ -429,8 +445,8 @@ function Play({ goBack }) {
         </p>
       )}
 
-      <button onClick={goBack} style={styles.abandonButton} disabled={gameOver}>
-        ← Abbandona Partita
+      <button onClick={goBack} style={styles.exitButton} disabled={gameOver}>
+        ← Exit
       </button>
     </div>
   );
@@ -447,11 +463,27 @@ const styles = {
     textAlign: "center",
     marginBottom: "40px",
   },
+  headerTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    maxWidth: "600px",
+    margin: "0 auto 20px",
+  },
   title: {
     fontSize: "32px",
     fontWeight: "700",
     color: "#1e293b",
-    margin: "0 0 20px 0",
+    margin: "0",
+  },
+  livesContainer: {
+    display: "flex",
+    gap: "8px",
+    fontSize: "24px",
+  },
+  heart: {
+    display: "inline-block",
+    animation: "pulse 1s ease-in-out infinite",
   },
   progressBar: {
     height: "8px",
@@ -551,8 +583,9 @@ const styles = {
     fontWeight: "600",
     margin: "20px 0",
     minHeight: "30px",
+    textAlign: "center",
   },
-  abandonButton: {
+  exitButton: {
     padding: "12px 24px",
     fontSize: "14px",
     background: "#f3f4f6",

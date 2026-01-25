@@ -1,13 +1,37 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
-function Practice() {
+function Practice({ goBack }) {
+  const [categories, setCategories] = useState([]);
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [selectedDifficulties, setSelectedDifficulties] = useState([]);
-  const [gameStarted, setGameStarted] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [practiceStarted, setPracticeStarted] = useState(false);
 
-  const categories = ["Verbs", "Nouns", "Adjectives", "Phrases"];
-  const difficulties = ["A1", "A2", "B1", "B2"];
+  const difficulties = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("words")
+          .select("category");
+
+        if (error) throw error;
+
+        const uniqueCategories = [...new Set(data.map((w) => w.category).filter(c => c))].sort();
+        console.log("Loaded categories:", uniqueCategories);
+        setCategories(uniqueCategories);
+      } catch (error) {
+        console.error("Error fetching categories:", error);
+        alert("Failed to load categories");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCategories();
+  }, []);
 
   const toggleCategory = (category) => {
     setSelectedCategories((prev) =>
@@ -25,159 +49,210 @@ function Practice() {
     );
   };
 
-  const handleStartGame = () => {
+  const handleStartPractice = () => {
     if (selectedCategories.length === 0 || selectedDifficulties.length === 0) {
-      alert("Please select at least one category and one difficulty.");
+      alert("Please select at least one category and one difficulty level!");
       return;
     }
-    setGameStarted(true);
+    setPracticeStarted(true);
   };
 
-  if (gameStarted) {
+  if (loading) {
+    return (
+      <div style={{ padding: "50px", textAlign: "center" }}>
+        <h1>Loading...</h1>
+      </div>
+    );
+  }
+
+  if (practiceStarted) {
     return (
       <PracticeGame
         categories={selectedCategories}
         difficulties={selectedDifficulties}
-        goBack={() => setGameStarted(false)}
-        goBackMenu={() => {
-          setGameStarted(false);
-          setSelectedCategories([]);
-          setSelectedDifficulties([]);
-        }}
+        goBack={() => setPracticeStarted(false)}
+        goBackMenu={goBack}
       />
     );
   }
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.title}>📚 Practice Mode</h1>
-      <p style={styles.subtitle}>Select categories and difficulty levels to practice</p>
+    <div style={{ padding: "50px", maxWidth: "600px", margin: "0 auto" }}>
+      <h1>📚 Practice Mode</h1>
+      <p style={{ fontSize: "16px", color: "#666", marginBottom: "30px" }}>
+        Select categories and difficulty levels to practice. This mode doesn't affect your leaderboard score.
+      </p>
 
-      <div style={styles.selectionsBox}>
-        <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>📂 Categories</h2>
-          <div style={styles.buttonGrid}>
+      <div style={{ marginBottom: "40px" }}>
+        <h2>Categories</h2>
+        {categories.length > 0 && (
+          <div style={{ marginBottom: "10px" }}>
+            <button
+              onClick={() => setSelectedCategories(categories)}
+              style={{
+                padding: "5px 10px",
+                marginRight: "10px",
+                backgroundColor: "#2196F3",
+                color: "white",
+                border: "none",
+                borderRadius: "3px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              Select All
+            </button>
+            <button
+              onClick={() => setSelectedCategories([])}
+              style={{
+                padding: "5px 10px",
+                backgroundColor: "#f44336",
+                color: "white",
+                border: "none",
+                borderRadius: "3px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              Deselect All
+            </button>
+          </div>
+        )}
+        {categories.length === 0 ? (
+          <p style={{ color: "red" }}>No categories found</p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "10px",
+            }}
+          >
             {categories.map((category) => (
-              <button
+              <label
                 key={category}
-                onClick={() => toggleCategory(category)}
                 style={{
-                  ...styles.selectionButton,
-                  ...(selectedCategories.includes(category)
-                    ? styles.selectionButtonActive
-                    : {}),
+                  padding: "10px",
+                  border: "1px solid #ddd",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  backgroundColor: selectedCategories.includes(category)
+                    ? "#e3f2fd"
+                    : "white",
+                  borderColor: selectedCategories.includes(category)
+                    ? "#2196F3"
+                    : "#ddd",
                 }}
               >
+                <input
+                  type="checkbox"
+                  checked={selectedCategories.includes(category)}
+                  onChange={() => toggleCategory(category)}
+                />
                 {category}
-                {selectedCategories.includes(category) && " ✓"}
-              </button>
+              </label>
             ))}
           </div>
-        </div>
+        )}
+      </div>
 
-        <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>📊 Difficulty</h2>
-          <div style={styles.buttonGrid}>
-            {difficulties.map((difficulty) => (
-              <button
-                key={difficulty}
-                onClick={() => toggleDifficulty(difficulty)}
-                style={{
-                  ...styles.selectionButton,
-                  ...(selectedDifficulties.includes(difficulty)
-                    ? styles.selectionButtonActive
-                    : {}),
-                }}
-              >
-                {difficulty}
-                {selectedDifficulties.includes(difficulty) && " ✓"}
-              </button>
-            ))}
-          </div>
+      <div style={{ marginBottom: "40px" }}>
+        <h2>Difficulty Levels</h2>
+        <div style={{ marginBottom: "10px" }}>
+          <button
+            onClick={() => setSelectedDifficulties(difficulties)}
+            style={{
+              padding: "5px 10px",
+              marginRight: "10px",
+              backgroundColor: "#2196F3",
+              color: "white",
+              border: "none",
+              borderRadius: "3px",
+              cursor: "pointer",
+              fontSize: "14px",
+            }}
+          >
+            Select All
+          </button>
+          <button
+            onClick={() => setSelectedDifficulties([])}
+            style={{
+              padding: "5px 10px",
+              backgroundColor: "#f44336",
+              color: "white",
+              border: "none",
+              borderRadius: "3px",
+              cursor: "pointer",
+              fontSize: "14px",
+            }}
+          >
+            Deselect All
+          </button>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(5, 1fr)",
+            gap: "10px",
+          }}
+        >
+          {difficulties.map((difficulty) => (
+            <label
+              key={difficulty}
+              style={{
+                padding: "10px",
+                border: "1px solid #ddd",
+                borderRadius: "5px",
+                cursor: "pointer",
+                textAlign: "center",
+                backgroundColor: selectedDifficulties.includes(difficulty)
+                  ? "#e3f2fd"
+                  : "white",
+                borderColor: selectedDifficulties.includes(difficulty)
+                  ? "#2196F3"
+                  : "#ddd",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selectedDifficulties.includes(difficulty)}
+                onChange={() => toggleDifficulty(difficulty)}
+              />
+              <div>{difficulty}</div>
+            </label>
+          ))}
         </div>
       </div>
 
-      <button onClick={handleStartGame} style={styles.startButton}>
-        🚀 Start Practice
-      </button>
+      <div style={{ textAlign: "center" }}>
+        <button
+          onClick={handleStartPractice}
+          style={{
+            padding: "12px 30px",
+            fontSize: "18px",
+            backgroundColor: "#4CAF50",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer",
+            marginRight: "10px",
+          }}
+        >
+          Start Practice
+        </button>
+        <button
+          onClick={goBack}
+          style={{
+            padding: "12px 30px",
+            fontSize: "18px",
+          }}
+        >
+          Back to Menu
+        </button>
+      </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "40px 20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-  title: {
-    fontSize: "40px",
-    fontWeight: "700",
-    color: "#1e293b",
-    textAlign: "center",
-    margin: "0 0 15px 0",
-  },
-  subtitle: {
-    fontSize: "16px",
-    color: "#64748b",
-    textAlign: "center",
-    margin: "0 0 40px 0",
-  },
-  selectionsBox: {
-    maxWidth: "800px",
-    margin: "0 auto 40px",
-    background: "white",
-    borderRadius: "16px",
-    padding: "40px",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-    border: "1px solid #e5e7eb",
-  },
-  section: {
-    marginBottom: "40px",
-  },
-  sectionTitle: {
-    fontSize: "18px",
-    fontWeight: "600",
-    color: "#1e293b",
-    margin: "0 0 20px 0",
-  },
-  buttonGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-    gap: "12px",
-  },
-  selectionButton: {
-    padding: "12px 16px",
-    fontSize: "14px",
-    fontWeight: "500",
-    background: "#f3f4f6",
-    color: "#64748b",
-    border: "2px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-  },
-  selectionButtonActive: {
-    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-    color: "white",
-    border: "2px solid #3b82f6",
-  },
-  startButton: {
-    display: "block",
-    margin: "0 auto",
-    padding: "14px 40px",
-    fontSize: "16px",
-    fontWeight: "600",
-    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-    color: "white",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
-    transition: "all 0.3s ease",
-  },
-};
 
 function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
   const [words, setWords] = useState([]);
@@ -188,7 +263,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
   const [practiceStats, setPracticeStats] = useState({ correct: 0, total: 0 });
   const [gameOver, setGameOver] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const fetchWords = async () => {
       try {
         let query = supabase.from("words").select("*");
@@ -205,6 +280,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
 
         if (error) throw error;
 
+        console.log("Loaded words:", data?.length || 0);
         const shuffled = data.sort(() => Math.random() - 0.5);
         setWords(shuffled);
       } catch (error) {
@@ -221,7 +297,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
 
   if (loading) {
     return (
-      <div style={practiceGameStyles.container}>
+      <div style={{ padding: "50px", textAlign: "center" }}>
         <h1>Loading...</h1>
       </div>
     );
@@ -229,11 +305,9 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
 
   if (words.length === 0) {
     return (
-      <div style={practiceGameStyles.container}>
+      <div style={{ padding: "50px", textAlign: "center" }}>
         <h1>No words found with those filters</h1>
-        <button onClick={goBack} style={practiceGameStyles.backButton}>
-          Back to Selection
-        </button>
+        <button onClick={goBack}>Back to Selection</button>
       </div>
     );
   }
@@ -304,302 +378,111 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
   };
 
   if (gameOver) {
-    const percentage = Math.round(
-      (practiceStats.correct / practiceStats.total) * 100
-    );
+    const percentage = Math.round((practiceStats.correct / practiceStats.total) * 100);
 
     return (
-      <div style={practiceGameStyles.gameOverContainer}>
-        <h1 style={practiceGameStyles.gameOverTitle}>📚 Practice Complete!</h1>
-        <div style={practiceGameStyles.statsBox}>
-          <p style={practiceGameStyles.statLine}>
-            Correct: <strong>{practiceStats.correct}/{practiceStats.total}</strong>
-          </p>
-          <p style={practiceGameStyles.statLine}>
-            Accuracy: <strong>{percentage}%</strong>
-          </p>
+      <div style={{ padding: "50px", textAlign: "center" }}>
+        <h1>📚 Practice Complete!</h1>
+        <div style={{ fontSize: "24px", margin: "20px 0" }}>
+          <p>Correct: {practiceStats.correct}/{practiceStats.total}</p>
+          <p>Accuracy: {percentage}%</p>
         </div>
-        <div style={practiceGameStyles.buttonGroup}>
-          <button onClick={goBack} style={practiceGameStyles.primaryButton}>
-            Back to Selection
-          </button>
-          <button onClick={goBackMenu} style={practiceGameStyles.secondaryButton}>
-            Back to Menu
-          </button>
-        </div>
+        <button
+          onClick={goBack}
+          style={{
+            padding: "10px 20px",
+            fontSize: "16px",
+            margin: "10px",
+          }}
+        >
+          Back to Selection
+        </button>
+        <button
+          onClick={goBackMenu}
+          style={{
+            padding: "10px 20px",
+            fontSize: "16px",
+            margin: "10px",
+          }}
+        >
+          Back to Menu
+        </button>
       </div>
     );
   }
 
   return (
-    <div style={practiceGameStyles.container}>
-      <div style={practiceGameStyles.header}>
-        <h1 style={practiceGameStyles.title}>
-          Practice Mode - Word {currentIndex + 1}/{words.length}
-        </h1>
-        <div style={practiceGameStyles.progressBar}>
-          <div
-            style={{
-              ...practiceGameStyles.progressFill,
-              width: `${((currentIndex + 1) / words.length) * 100}%`,
-            }}
-          />
-        </div>
+    <div style={{ padding: "50px", textAlign: "center" }}>
+      <h1>Practice Mode</h1>
+
+      <div style={{ marginBottom: "30px", fontSize: "18px" }}>
+        <p>
+          <strong>Word {currentIndex + 1}/{words.length}</strong>
+        </p>
+        <p>
+          Correct: {practiceStats.correct}/{practiceStats.total}
+        </p>
       </div>
 
-      <div style={practiceGameStyles.stats}>
-        <div style={practiceGameStyles.statItem}>
-          <span>✅</span> Correct: <strong>{practiceStats.correct}</strong>
-        </div>
-        <div style={practiceGameStyles.statItem}>
-          <span>📊</span> Total: <strong>{practiceStats.total}</strong>
-        </div>
-      </div>
-
-      <div style={practiceGameStyles.questionContainer}>
-        <h2 style={practiceGameStyles.questionText}>Traduci in Olandese:</h2>
-        <h1 style={practiceGameStyles.wordToTranslate}>{currentWord.english}</h1>
+      <div style={{ fontSize: "28px", marginBottom: "20px" }}>
+        Translate to Dutch: <strong>{currentWord.english}</strong>
       </div>
 
       {currentWord.example_nl && (
-        <div style={practiceGameStyles.exampleBox}>
-          <p style={practiceGameStyles.exampleNL}>
-            <strong>🇳🇱</strong> {currentWord.example_nl}
+        <div
+          style={{
+            backgroundColor: "#f0f0f0",
+            padding: "10px",
+            borderRadius: "5px",
+            marginBottom: "20px",
+            fontSize: "14px",
+          }}
+        >
+          <p style={{ margin: "5px 0", fontStyle: "italic", color: "#333" }}>
+            <strong>Dutch:</strong> {currentWord.example_nl}
           </p>
           {currentWord.example_en && (
-            <p style={practiceGameStyles.exampleEN}>
-              <strong>🇬🇧</strong> {currentWord.example_en}
+            <p style={{ margin: "5px 0", color: "#666" }}>
+              <strong>English:</strong> {currentWord.example_en}
             </p>
           )}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={practiceGameStyles.form}>
+      <form onSubmit={handleSubmit}>
         <input
           type="text"
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
-          placeholder="Scrivi la traduzione..."
-          style={practiceGameStyles.input}
+          placeholder="Type Dutch translation"
+          style={{
+            padding: "12px",
+            fontSize: "18px",
+            width: "300px",
+            marginRight: "10px",
+          }}
           autoFocus
         />
-        <button type="submit" style={practiceGameStyles.submitButton}>
-          Invia
-        </button>
+        <button type="submit">Submit</button>
       </form>
 
       {feedback && (
         <p
           style={{
-            ...practiceGameStyles.feedback,
-            color: feedback.includes("✅") ? "#10b981" : "#ef4444",
+            fontSize: "20px",
+            marginTop: "20px",
+            color: feedback.includes("✅") ? "green" : "red",
           }}
         >
           {feedback}
         </p>
       )}
 
-      <button onClick={goBack} style={practiceGameStyles.abandonButton}>
-        ← Back to Selection
+      <button onClick={goBack} style={{ marginTop: "30px" }}>
+        Back to Selection
       </button>
     </div>
   );
 }
-
-const practiceGameStyles = {
-  container: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "40px 20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-  header: {
-    textAlign: "center",
-    marginBottom: "40px",
-  },
-  title: {
-    fontSize: "28px",
-    fontWeight: "700",
-    color: "#1e293b",
-    margin: "0 0 20px 0",
-  },
-  progressBar: {
-    height: "8px",
-    background: "#e5e7eb",
-    borderRadius: "10px",
-    overflow: "hidden",
-    maxWidth: "400px",
-    margin: "0 auto",
-  },
-  progressFill: {
-    height: "100%",
-    background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
-    transition: "width 0.3s ease",
-  },
-  stats: {
-    display: "flex",
-    justifyContent: "center",
-    gap: "40px",
-    marginBottom: "40px",
-    flexWrap: "wrap",
-  },
-  statItem: {
-    fontSize: "16px",
-    color: "#475569",
-    fontWeight: "500",
-  },
-  questionContainer: {
-    textAlign: "center",
-    marginBottom: "40px",
-  },
-  questionText: {
-    fontSize: "18px",
-    color: "#64748b",
-    margin: "0 0 15px 0",
-    fontWeight: "500",
-  },
-  wordToTranslate: {
-    fontSize: "44px",
-    color: "#1e293b",
-    margin: "0",
-    fontWeight: "700",
-  },
-  exampleBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "20px",
-    maxWidth: "600px",
-    margin: "0 auto 30px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-  },
-  exampleNL: {
-    fontSize: "14px",
-    color: "#475569",
-    margin: "0 0 10px 0",
-  },
-  exampleEN: {
-    fontSize: "14px",
-    color: "#64748b",
-    margin: "0",
-  },
-  form: {
-    display: "flex",
-    gap: "10px",
-    justifyContent: "center",
-    marginBottom: "30px",
-    flexWrap: "wrap",
-  },
-  input: {
-    padding: "12px 16px",
-    fontSize: "16px",
-    border: "2px solid #e5e7eb",
-    borderRadius: "8px",
-    width: "300px",
-    transition: "all 0.3s ease",
-    fontFamily: "inherit",
-  },
-  submitButton: {
-    padding: "12px 32px",
-    fontSize: "16px",
-    fontWeight: "600",
-    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-    color: "white",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
-  },
-  feedback: {
-    fontSize: "18px",
-    fontWeight: "600",
-    margin: "20px 0",
-    minHeight: "30px",
-    textAlign: "center",
-  },
-  abandonButton: {
-    padding: "12px 24px",
-    fontSize: "14px",
-    background: "#f3f4f6",
-    color: "#64748b",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    display: "block",
-    margin: "0 auto",
-  },
-  gameOverContainer: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "40px 20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-  gameOverTitle: {
-    fontSize: "40px",
-    color: "#1e293b",
-    margin: "0 0 30px 0",
-  },
-  statsBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "30px",
-    marginBottom: "30px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-    minWidth: "300px",
-  },
-  statLine: {
-    fontSize: "18px",
-    color: "#475569",
-    margin: "12px 0",
-  },
-  buttonGroup: {
-    display: "flex",
-    gap: "16px",
-    flexWrap: "wrap",
-    justifyContent: "center",
-  },
-  primaryButton: {
-    padding: "12px 32px",
-    fontSize: "16px",
-    fontWeight: "600",
-    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-    color: "white",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.2)",
-    transition: "all 0.3s ease",
-  },
-  secondaryButton: {
-    padding: "12px 32px",
-    fontSize: "16px",
-    fontWeight: "600",
-    background: "white",
-    color: "#64748b",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-  },
-  backButton: {
-    padding: "12px 24px",
-    fontSize: "14px",
-    fontWeight: "600",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    background: "white",
-    color: "#64748b",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-  },
-};
 
 export default Practice;
