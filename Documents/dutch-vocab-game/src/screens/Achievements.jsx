@@ -19,23 +19,63 @@ function Achievements({ goBack, userId }) {
   });
   const [loading, setLoading] = useState(true);
   const [medalHistory, setMedalHistory] = useState([]);
+  const [debugInfo, setDebugInfo] = useState("");
 
   useEffect(() => {
-    if (userId) {
+    console.log("Achievements component mounted");
+    console.log("userId received:", userId);
+    console.log("userId type:", typeof userId);
+    
+    if (userId && String(userId).trim().length > 0) {
+      console.log("✅ userId is valid, fetching...");
+      setDebugInfo(`userId: ${userId}`);
       fetchAchievements();
+    } else {
+      console.warn("❌ userId is undefined, null, or empty!");
+      setDebugInfo(`❌ ERROR: userId is invalid (${userId})`);
+      setLoading(false);
     }
   }, [userId]);
 
   const fetchAchievements = async () => {
     setLoading(true);
     try {
-      const { data: sessions } = await supabase
+      console.log("🔄 Fetching achievements for userId:", userId);
+
+      // Test: Fetch ALL sessions first
+      const { data: allSessions, error: allError } = await supabase
         .from("sessions")
         .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+        .limit(5);
+
+      console.log("📊 All sessions in DB (first 5):", allSessions?.length || 0, allSessions);
+
+      if (allError) {
+        console.error("❌ Error fetching all sessions:", allError);
+      }
+
+      // Now fetch user-specific sessions
+      console.log("🔍 Querying user sessions with userId:", userId);
+      
+      const { data: sessions, error } = await supabase
+        .from("sessions")
+        .select("*")
+        .eq("user_id", userId);
+
+      console.log("👤 User sessions found:", sessions?.length || 0);
+      console.log("📋 Session data:", sessions);
+      console.log("⚠️ Query error:", error);
+
+      if (error) {
+        console.error("❌ Error fetching sessions:", error);
+        setDebugInfo(`❌ Query Error: ${error.message}`);
+        setLoading(false);
+        return;
+      }
 
       if (sessions && sessions.length > 0) {
+        console.log("✅ Sessions found! Processing data...");
+        
         const bestScore = Math.max(...sessions.map((s) => s.score || 0));
         const bestLevel = Math.max(...sessions.map((s) => s.level || 0));
         const totalPoints = sessions.reduce((sum, s) => sum + (s.score || 0), 0);
@@ -44,17 +84,24 @@ function Achievements({ goBack, userId }) {
         const correctWords = sessions.reduce((sum, s) => sum + (s.correct_answers || 0), 0);
         const winRate = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 0;
 
+        console.log("📈 Stats calculated:", {
+          totalGames: sessions.length,
+          bestScore,
+          totalPoints,
+          bestLevel,
+          avgScore,
+          winRate,
+        });
+
         const { data: weeklyMedals } = await supabase
           .from("weekly_medals")
           .select("medal_type, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
+          .eq("user_id", userId);
 
         const { data: monthlyMedals } = await supabase
           .from("monthly_medals")
           .select("medal_type, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
+          .eq("user_id", userId);
 
         let weeklyCount = { gold: 0, silver: 0, bronze: 0 };
         let monthlyCount = { gold: 0, silver: 0, bronze: 0 };
@@ -94,9 +141,14 @@ function Achievements({ goBack, userId }) {
         });
 
         setMedalHistory(allMedals);
+        setDebugInfo("✅ Data loaded successfully!");
+      } else {
+        console.warn("⚠️ No sessions found for user:", userId);
+        setDebugInfo("⚠️ No game sessions found for this user");
       }
     } catch (error) {
-      console.error("Error fetching achievements:", error);
+      console.error("❌ Error fetching achievements:", error);
+      setDebugInfo(`❌ Exception: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -105,18 +157,8 @@ function Achievements({ goBack, userId }) {
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
   };
@@ -144,6 +186,18 @@ function Achievements({ goBack, userId }) {
       fontSize: "clamp(13px, 3vw, 16px)",
       color: "#06b6d4",
       margin: "0",
+    },
+    debugBox: {
+      background: "rgba(239, 68, 68, 0.2)",
+      border: "1px solid #ef4444",
+      color: "#ff6b6b",
+      padding: "12px",
+      borderRadius: "8px",
+      marginBottom: "16px",
+      fontSize: "clamp(11px, 2vw, 12px)",
+      fontFamily: "monospace",
+      textAlign: "center",
+      wordBreak: "break-all",
     },
     backButtonTop: {
       position: "fixed",
@@ -303,10 +357,26 @@ function Achievements({ goBack, userId }) {
   if (!userId) {
     return (
       <div style={styles.container}>
+        <button
+          style={styles.backButtonTop}
+          onClick={goBack}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(6, 182, 212, 0.2)";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
         <div style={styles.header}>
           <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
         </div>
-        <div style={styles.emptyState}>Loading achievements...</div>
+        <div style={styles.debugBox}>
+          ❌ ERROR: userId not passed to component!
+        </div>
       </div>
     );
   }
@@ -334,6 +404,12 @@ function Achievements({ goBack, userId }) {
       </div>
 
       <div style={styles.contentContainer}>
+        {debugInfo && (
+          <div style={styles.debugBox}>
+            {debugInfo}
+          </div>
+        )}
+
         {loading ? (
           <div style={styles.emptyState}>Loading achievements...</div>
         ) : (
