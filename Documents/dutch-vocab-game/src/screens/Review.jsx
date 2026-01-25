@@ -83,16 +83,45 @@ function Review({ goBack }) {
     fetchWordsToReview();
   }, []);
 
+  const normalize = (str) => {
+    return str
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w\s]/g, "")
+      .replace(/ï/g, "i")
+      .replace(/ü/g, "u")
+      .replace(/ö/g, "o")
+      .replace(/\s+/g, " ");
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
-    const correctAnswer = words[currentIndex].dutch.toLowerCase().trim();
-    const isCorrect = userAnswer === correctAnswer;
+
+    const correctFull = words[currentIndex].dutch.toLowerCase().trim();
+    const correctBase = correctFull
+      .split(",")[0]
+      .replace(/^(de |het |een |het )/, "")
+      .trim();
+
+    const normalizedAnswer = normalize(userAnswer);
+    const normalizedFull = normalize(correctFull);
+    const normalizedBase = normalize(correctBase);
+    const normalizedWithDe = normalize(`de ${correctBase}`);
+    const normalizedWithHet = normalize(`het ${correctBase}`);
+
+    const isCorrect =
+      normalizedAnswer === normalizedFull ||
+      normalizedAnswer === normalizedBase ||
+      normalizedAnswer === normalizedWithDe ||
+      normalizedAnswer === normalizedWithHet;
 
     if (isCorrect) {
       setFeedback("✅ Correct!");
     } else {
-      setFeedback(`❌ Wrong! It's '${words[currentIndex].dutch}'.`);
+      setFeedback(`❌ Wrong! The answer is '${words[currentIndex].dutch}'.`);
     }
 
     setShowAnswer(true);
@@ -118,7 +147,7 @@ function Review({ goBack }) {
 
   if (loading) {
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
+      <div style={styles.loadingContainer}>
         <h1>Loading Review Words...</h1>
       </div>
     );
@@ -126,10 +155,10 @@ function Review({ goBack }) {
 
   if (words.length === 0) {
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
+      <div style={styles.loadingContainer}>
         <h1>🎉 No words to review!</h1>
         <p>All your words are mastered. Great job!</p>
-        <button onClick={goBack} style={{ marginTop: "20px" }}>
+        <button onClick={goBack} style={styles.secondaryButton}>
           Back to Menu
         </button>
       </div>
@@ -139,119 +168,108 @@ function Review({ goBack }) {
   const currentWord = words[currentIndex];
 
   return (
-    <div style={{ padding: "50px", textAlign: "center" }}>
-      <h1>📚 Review Mode</h1>
-
-      <div style={{ marginBottom: "30px", fontSize: "16px" }}>
-        <p>
-          <strong>Word {currentIndex + 1}/{words.length}</strong>
-        </p>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "20px",
-            marginTop: "10px",
-          }}
-        >
-          <div>
-            <p style={{ margin: "0 0 5px 0" }}>Correct: {currentWord.correct_count}</p>
-            <p style={{ margin: "0" }}>Incorrect: {currentWord.incorrect_count}</p>
-          </div>
-          <div>
-            <p style={{ margin: "0" }}>
-              <strong>Mastery: {currentWord.masteryPercent}%</strong>
-            </p>
-            <div
-              style={{
-                width: "100px",
-                height: "8px",
-                backgroundColor: "#ddd",
-                borderRadius: "4px",
-                marginTop: "5px",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${currentWord.masteryPercent}%`,
-                  height: "100%",
-                  backgroundColor: "#4CAF50",
-                  transition: "width 0.3s",
-                }}
-              />
-            </div>
-          </div>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <div style={styles.headerTop}>
+          <h1 style={styles.title}>📚 Review Mode</h1>
+        </div>
+        <div style={styles.progressBar}>
+          <div
+            style={{
+              ...styles.progressFill,
+              width: `${((currentIndex + 1) / words.length) * 100}%`,
+            }}
+          />
         </div>
       </div>
 
-      <div style={{ fontSize: "28px", marginBottom: "20px" }}>
-        Translate to Dutch: <strong>{currentWord.english}</strong>
+      <div style={styles.statsGrid}>
+        <div style={styles.statItem}>
+          <span>📊</span> Progress: <strong>{currentIndex + 1}/{words.length}</strong>
+        </div>
+        <div style={styles.statItem}>
+          <span>📈</span> Mastery: <strong>{currentWord.masteryPercent}%</strong>
+        </div>
+        <div style={styles.statItem}>
+          <span>✅</span> Correct: <strong>{currentWord.correct_count}</strong>
+        </div>
+        <div style={styles.statItem}>
+          <span>❌</span> Incorrect: <strong>{currentWord.incorrect_count}</strong>
+        </div>
       </div>
 
-      {currentWord.example_en && (
-        <div
-          style={{
-            backgroundColor: "#f0f0f0",
-            padding: "10px",
-            borderRadius: "5px",
-            marginBottom: "20px",
-            fontSize: "14px",
-          }}
-        >
-          <p style={{ margin: "5px 0" }}>
-            <strong>Example:</strong> {currentWord.example_en}
+      <div style={styles.masteryBarContainer}>
+        <div style={styles.masteryBar}>
+          <div
+            style={{
+              width: `${currentWord.masteryPercent}%`,
+              height: "100%",
+              background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
+              transition: "width 0.3s ease",
+              borderRadius: "4px",
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={styles.questionContainer}>
+        <p style={styles.questionLabel}>
+          Question {currentIndex + 1}/{words.length}
+        </p>
+        <h2 style={styles.questionText}>Translate to Dutch:</h2>
+        <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
+      </div>
+
+      {currentWord.example_nl && (
+        <div style={styles.exampleBox}>
+          <p style={styles.exampleNL}>
+            <strong>🇳🇱</strong> {currentWord.example_nl}
           </p>
-          {currentWord.example_nl && (
-            <p style={{ margin: "5px 0", color: "#666" }}>
-              {currentWord.example_nl}
+          {currentWord.example_en && (
+            <p style={styles.exampleEN}>
+              <strong>🇬🇧</strong> {currentWord.example_en}
             </p>
           )}
         </div>
       )}
 
       {!showAnswer ? (
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} style={styles.form}>
           <input
             type="text"
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Type Dutch translation"
-            style={{
-              padding: "12px",
-              fontSize: "18px",
-              width: "300px",
-              marginRight: "10px",
-            }}
+            placeholder="Enter the translation..."
+            style={styles.input}
             autoFocus
           />
-          <button type="submit">Check</button>
+          <button type="submit" style={styles.submitButton}>
+            Check
+          </button>
         </form>
       ) : (
         <div>
           {feedback && (
             <p
               style={{
-                fontSize: "20px",
-                marginTop: "20px",
-                color: feedback.includes("✅") ? "green" : "red",
+                ...styles.feedback,
+                color: feedback.includes("✅") ? "#10b981" : "#ef4444",
               }}
             >
               {feedback}
             </p>
           )}
-          <p style={{ fontSize: "16px", marginTop: "15px" }}>
-            <strong>Answer: {currentWord.dutch}</strong>
-          </p>
+          <div style={styles.answerDisplay}>
+            <p style={styles.answerLabel}>Correct Answer:</p>
+            <p style={styles.answerText}>{currentWord.dutch}</p>
+          </div>
           <button
             onClick={nextWord}
             style={{
-              padding: "10px 20px",
-              fontSize: "16px",
-              margin: "10px",
-              backgroundColor: currentIndex < words.length - 1 ? "#2196F3" : "#ccc",
-              color: "white",
-              cursor: currentIndex < words.length - 1 ? "pointer" : "not-allowed",
+              ...styles.primaryButton,
+              opacity: currentIndex < words.length - 1 ? 1 : 0.5,
+              cursor:
+                currentIndex < words.length - 1 ? "pointer" : "not-allowed",
             }}
             disabled={currentIndex >= words.length - 1}
           >
@@ -260,23 +278,229 @@ function Review({ goBack }) {
         </div>
       )}
 
-      <div style={{ marginTop: "20px" }}>
+      <div style={styles.navigationButtons}>
         <button
           onClick={previousWord}
           disabled={currentIndex === 0}
-          style={{ marginRight: "10px", opacity: currentIndex === 0 ? 0.5 : 1 }}
+          style={{
+            ...styles.secondaryButton,
+            opacity: currentIndex === 0 ? 0.5 : 1,
+            cursor: currentIndex === 0 ? "not-allowed" : "pointer",
+          }}
         >
           ← Previous
         </button>
-        <button
-          onClick={goBack}
-          style={{ marginLeft: "10px" }}
-        >
+        <button onClick={goBack} style={styles.secondaryButton}>
           Back to Menu
         </button>
       </div>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    padding: "40px 20px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  loadingContainer: {
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  header: {
+    textAlign: "center",
+    marginBottom: "40px",
+  },
+  headerTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    maxWidth: "600px",
+    margin: "0 auto 20px",
+  },
+  title: {
+    fontSize: "32px",
+    fontWeight: "700",
+    color: "#1e293b",
+    margin: "0",
+  },
+  progressBar: {
+    height: "8px",
+    background: "#e5e7eb",
+    borderRadius: "10px",
+    overflow: "hidden",
+    maxWidth: "400px",
+    margin: "0 auto",
+  },
+  progressFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
+    transition: "width 0.3s ease",
+  },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "16px",
+    maxWidth: "700px",
+    margin: "0 auto 30px",
+  },
+  statItem: {
+    padding: "16px",
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+    fontSize: "14px",
+    color: "#475569",
+    fontWeight: "500",
+    textAlign: "center",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  masteryBarContainer: {
+    maxWidth: "600px",
+    margin: "0 auto 30px",
+  },
+  masteryBar: {
+    height: "12px",
+    background: "#e5e7eb",
+    borderRadius: "6px",
+    overflow: "hidden",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  questionContainer: {
+    textAlign: "center",
+    marginBottom: "40px",
+  },
+  questionLabel: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0 0 10px 0",
+  },
+  questionText: {
+    fontSize: "18px",
+    color: "#64748b",
+    margin: "0 0 15px 0",
+    fontWeight: "500",
+  },
+  wordToTranslate: {
+    fontSize: "44px",
+    color: "#1e293b",
+    margin: "0",
+    fontWeight: "700",
+  },
+  exampleBox: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "20px",
+    maxWidth: "600px",
+    margin: "0 auto 30px",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  exampleNL: {
+    fontSize: "14px",
+    color: "#475569",
+    margin: "0 0 10px 0",
+  },
+  exampleEN: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0",
+  },
+  form: {
+    display: "flex",
+    gap: "10px",
+    justifyContent: "center",
+    marginBottom: "30px",
+    flexWrap: "wrap",
+  },
+  input: {
+    padding: "12px 16px",
+    fontSize: "16px",
+    border: "2px solid #e5e7eb",
+    borderRadius: "8px",
+    width: "300px",
+    transition: "all 0.3s ease",
+    fontFamily: "inherit",
+  },
+  submitButton: {
+    padding: "12px 32px",
+    fontSize: "16px",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+  },
+  feedback: {
+    fontSize: "18px",
+    fontWeight: "600",
+    margin: "20px 0",
+    minHeight: "30px",
+    textAlign: "center",
+  },
+  answerDisplay: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "24px",
+    maxWidth: "600px",
+    margin: "20px auto",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  answerLabel: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0 0 10px 0",
+    fontWeight: "500",
+  },
+  answerText: {
+    fontSize: "22px",
+    fontWeight: "700",
+    color: "#1e293b",
+    margin: "0",
+  },
+  primaryButton: {
+    padding: "14px 40px",
+    fontSize: "16px",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
+    transition: "all 0.3s ease",
+    display: "block",
+    margin: "30px auto",
+  },
+  secondaryButton: {
+    padding: "12px 24px",
+    fontSize: "14px",
+    background: "#f3f4f6",
+    color: "#475569",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    fontWeight: "500",
+  },
+  navigationButtons: {
+    display: "flex",
+    gap: "16px",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    marginTop: "40px",
+  },
+};
 
 export default Review;
