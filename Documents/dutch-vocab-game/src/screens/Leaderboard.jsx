@@ -120,15 +120,20 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
   const getWeekStart = () => {
-    const today = new Date();
-    const day = today.getDay();
-    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
-    return new Date(today.setDate(diff));
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - daysToSubtract);
+    weekStart.setHours(0, 0, 0, 0);
+    return weekStart;
   };
 
   const getMonthStart = () => {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    monthStart.setHours(0, 0, 0, 0);
+    return monthStart;
   };
 
   const getMedalEmoji = (rank) => {
