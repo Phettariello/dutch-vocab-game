@@ -12,13 +12,14 @@ function Play({ goBack }) {
   const [gameOver, setGameOver] = useState(false);
   const [sessionResults, setSessionResults] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [userLevel, setUserLevel] = useState(1);
-  const [currentSessionLevel, setCurrentSessionLevel] = useState(1);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [totalSessionScore, setTotalSessionScore] = useState(0);
   const [allSessionResults, setAllSessionResults] = useState([]);
-  const [usedWordIds, setUsedWordIds] = useState(new Set()); // 🆕 Traccia parole già usate
+  const [usedWordIds, setUsedWordIds] = useState(new Set());
+  const [questionsInLevel, setQuestionsInLevel] = useState(0);
 
-  // Carica le parole per il livello corrente
+  const QUESTIONS_PER_LEVEL = 10;
+
   const fetchWordsForLevel = async (levelNumber) => {
     try {
       let maxDifficulty = 3;
@@ -30,7 +31,6 @@ function Play({ goBack }) {
         maxDifficulty = 5;
       }
 
-      // Prova con offset casuale (10 domande)
       const randomOffset = Math.floor(Math.random() * 50);
 
       let { data, error } = await supabase
@@ -41,9 +41,7 @@ function Play({ goBack }) {
 
       if (error) throw error;
 
-      // Se ne trovi poche, prendi senza limite di range
       if (!data || data.length < 10) {
-        console.warn("Trovate solo", data?.length || 0, "parole. Prendo tutte.");
         const { data: allData, error: allError } = await supabase
           .from("words")
           .select("*")
@@ -54,10 +52,10 @@ function Play({ goBack }) {
         data = allData;
       }
 
-      // 🆕 Filtra le parole già usate e mischiale
+      // Filtra parole già usate
       const availableWords = data.filter((w) => !usedWordIds.has(w.id));
       const shuffled = availableWords.sort(() => Math.random() - 0.5);
-      
+
       return shuffled.length > 0 ? shuffled : data.sort(() => Math.random() - 0.5);
     } catch (error) {
       console.error("Error fetching words:", error);
@@ -69,23 +67,10 @@ function Play({ goBack }) {
     const initializeGame = async () => {
       setLoading(true);
       try {
-        const { data: userData } = await supabase.auth.getUser();
-        const userId = userData.user.id;
-
-        const { data: masteredWords } = await supabase
-          .from("user_progress")
-          .select("id")
-          .eq("user_id", userId)
-          .eq("mastered", true);
-
-        const masteredCount = masteredWords?.length || 0;
-        setUserLevel(
-          masteredCount >= 50 ? 3 : masteredCount >= 20 ? 2 : 1
-        );
-
         const firstLevelWords = await fetchWordsForLevel(1);
         setWords(firstLevelWords);
-        setCurrentSessionLevel(1);
+        setCurrentLevel(1);
+        setQuestionsInLevel(0);
       } catch (error) {
         console.error("Error initializing game:", error);
         alert("Failed to load words.");
@@ -100,7 +85,7 @@ function Play({ goBack }) {
 
   if (loading) {
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
+      <div style={styles.loadingContainer}>
         <h1>Loading...</h1>
       </div>
     );
@@ -108,7 +93,7 @@ function Play({ goBack }) {
 
   if (words.length === 0) {
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
+      <div style={styles.loadingContainer}>
         <h1>No words available</h1>
         <button onClick={goBack}>Back to Menu</button>
       </div>
@@ -156,14 +141,13 @@ function Play({ goBack }) {
     let newStreak = streak;
     let newLives = lives;
 
-    // Punteggio = difficoltà della parola
     const wordPoints = currentWord.difficulty || 1;
 
     if (isCorrect) {
       newScore += wordPoints;
       newStreak += 1;
       if (newStreak >= 5) {
-        newScore += 10; // Bonus streak
+        newScore += 10;
         newStreak = 0;
       }
       setFeedback(`✅ Correct! (+${wordPoints})`);
@@ -173,7 +157,6 @@ function Play({ goBack }) {
       setFeedback(`❌ Wrong! It's '${currentWord.dutch}'.`);
     }
 
-    // 🆕 Aggiungi la parola alle usate
     const newUsedWords = new Set(usedWordIds);
     newUsedWords.add(currentWord.id);
     setUsedWordIds(newUsedWords);
@@ -182,22 +165,31 @@ function Play({ goBack }) {
       word: currentWord.english,
       correct: isCorrect,
       answer: userAnswer,
-      level: currentSessionLevel,
+      level: currentLevel,
     };
 
     setSessionResults([...sessionResults, newSessionResult]);
     setAllSessionResults([...allSessionResults, newSessionResult]);
-
     setScore(newScore);
     setLives(newLives);
     setStreak(newStreak);
     setAnswer("");
 
+    const newQuestionsInLevel = questionsInLevel + 1;
+    setQuestionsInLevel(newQuestionsInLevel);
+
     if (newLives <= 0) {
       setTimeout(() => {
+        saveSessionAuto(newScore + totalSessionScore, allSessionResults);
         setGameOver(true);
       }, 2000);
+    } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
+      // Fine del livello, vai al prossimo
+      setTimeout(() => {
+        nextLevel(newScore);
+      }, 2000);
     } else if (currentIndex >= words.length - 1) {
+      // Fine delle parole disponibili
       setTimeout(() => {
         nextLevel(newScore);
       }, 2000);
@@ -210,7 +202,7 @@ function Play({ goBack }) {
   };
 
   const nextLevel = async (levelScore) => {
-    const nextLevelNumber = currentSessionLevel + 1;
+    const nextLevelNumber = currentLevel + 1;
 
     if (nextLevelNumber > 100) {
       setTotalSessionScore(totalSessionScore + levelScore);
@@ -222,12 +214,13 @@ function Play({ goBack }) {
       setLoading(true);
       const nextLevelWords = await fetchWordsForLevel(nextLevelNumber);
       setWords(nextLevelWords);
-      setCurrentSessionLevel(nextLevelNumber);
+      setCurrentLevel(nextLevelNumber);
       setCurrentIndex(0);
       setAnswer("");
       setFeedback("");
       setScore(0);
       setStreak(0);
+      setQuestionsInLevel(0);
       setTotalSessionScore(totalSessionScore + levelScore);
       setSessionResults([]);
     } catch (error) {
@@ -239,23 +232,11 @@ function Play({ goBack }) {
     }
   };
 
-  const startNewSession = () => {
-    window.location.reload();
-  };
-
-  const saveSession = async () => {
+  const saveSessionAuto = async (finalScore, results) => {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user.id;
-      const correctCount = allSessionResults.filter((r) => r.correct).length;
-      const finalScore = totalSessionScore + score;
-
-      console.log("Saving session with:", {
-        userId,
-        score: finalScore,
-        correctCount,
-        totalWords: allSessionResults.length,
-      });
+      const correctCount = results.filter((r) => r.correct).length;
 
       // Save session
       const { error: sessionError } = await supabase.from("sessions").insert([
@@ -263,19 +244,20 @@ function Play({ goBack }) {
           user_id: userId,
           score: finalScore,
           correct_answers: correctCount,
-          total_words: allSessionResults.length,
+          total_words: results.length,
+          level: currentLevel,
           ended_at: new Date(),
         },
       ]);
 
       if (sessionError) {
         console.error("Session save error:", sessionError);
-        throw sessionError;
+        return;
       }
 
       // Save progress for each unique word
       const uniqueWords = new Map();
-      for (const result of allSessionResults) {
+      for (const result of results) {
         if (!uniqueWords.has(result.word)) {
           uniqueWords.set(result.word, []);
         }
@@ -331,12 +313,14 @@ function Play({ goBack }) {
         }
       }
 
-      alert("Session saved!");
-      goBack();
+      console.log("Session saved automatically!");
     } catch (error) {
       console.error("Error saving session:", error);
-      alert("Failed to save session: " + error.message);
     }
+  };
+
+  const startNewGame = () => {
+    window.location.reload();
   };
 
   if (gameOver) {
@@ -344,116 +328,321 @@ function Play({ goBack }) {
     const finalScore = totalSessionScore + score;
 
     return (
-      <div style={{ padding: "50px", textAlign: "center" }}>
-        <h1>🎮 Game Over!</h1>
-        <div style={{ fontSize: "24px", margin: "20px 0" }}>
-          <p>Final Score: <strong>{finalScore}</strong></p>
-          <p>Levels Completed: <strong>{currentSessionLevel}</strong></p>
-          <p>Total Correct: {correctCount}/{allSessionResults.length}</p>
-          <p>Lives left: {lives}</p>
+      <div style={styles.gameOverContainer}>
+        <h1 style={styles.gameOverTitle}>🎮 Partita Terminata!</h1>
+        <div style={styles.statsContainer}>
+          <div style={styles.statBox}>
+            <p style={styles.statLabel}>Punteggio Finale</p>
+            <p style={styles.statValue}>{finalScore}</p>
+          </div>
+          <div style={styles.statBox}>
+            <p style={styles.statLabel}>Livelli Completati</p>
+            <p style={styles.statValue}>{currentLevel}</p>
+          </div>
+          <div style={styles.statBox}>
+            <p style={styles.statLabel}>Risposte Corrette</p>
+            <p style={styles.statValue}>{correctCount}/{allSessionResults.length}</p>
+          </div>
         </div>
-        <button
-          onClick={saveSession}
-          style={{
-            padding: "10px 20px",
-            fontSize: "16px",
-            margin: "10px",
-            backgroundColor: "#4CAF50",
-            color: "white",
-          }}
-        >
-          Save Session
-        </button>
-        <button
-          onClick={startNewSession}
-          style={{ padding: "10px 20px", fontSize: "16px", margin: "10px" }}
-        >
-          New Session
-        </button>
-        <button onClick={goBack}>Back to Menu</button>
+        <div style={styles.buttonContainer}>
+          <button onClick={startNewGame} style={styles.primaryButton}>
+            🎮 New Game
+          </button>
+          <button onClick={goBack} style={styles.secondaryButton}>
+            ← Back to Menu
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "50px", textAlign: "center" }}>
-      <h1>Play Mode - Level {currentSessionLevel}/100</h1>
-
-      <div style={{ marginBottom: "30px", fontSize: "18px" }}>
-        <p>
-          <strong>Word {currentIndex + 1}/{words.length}:</strong> {currentWord.category}
-        </p>
-        <p>
-          Total Score: <strong>{totalSessionScore + score}</strong> | Lives: {lives}/5 | Streak: {streak}
-        </p>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <h1 style={styles.title}>Partita - Livello {currentLevel}/100</h1>
+        <div style={styles.progressBar}>
+          <div
+            style={{
+              ...styles.progressFill,
+              width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
+            }}
+          />
+        </div>
       </div>
 
-      <div style={{ fontSize: "28px", marginBottom: "20px" }}>
-        Translate to Dutch: <strong>{currentWord.english}</strong>
+      <div style={styles.stats}>
+        <div style={styles.statItem}>
+          <span>📊</span> Punti: <strong>{totalSessionScore + score}</strong>
+        </div>
+        <div style={styles.statItem}>
+          <span>❤️</span> Vite: <strong>{lives}/5</strong>
+        </div>
+        <div style={styles.statItem}>
+          <span>🔥</span> Serie: <strong>{streak}</strong>
+        </div>
+      </div>
+
+      <div style={styles.questionContainer}>
+        <p style={styles.questionLabel}>
+          Domanda {currentIndex + 1}/{words.length}
+        </p>
+        <h2 style={styles.questionText}>Traduci in Olandese:</h2>
+        <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
       </div>
 
       {currentWord.example_nl && (
-        <div
-          style={{
-            backgroundColor: "#f0f0f0",
-            padding: "10px",
-            borderRadius: "5px",
-            marginBottom: "20px",
-            fontSize: "14px",
-          }}
-        >
-          <p style={{ margin: "5px 0", fontStyle: "italic", color: "#333" }}>
-            <strong>Dutch:</strong> {currentWord.example_nl}
+        <div style={styles.exampleBox}>
+          <p style={styles.exampleNL}>
+            <strong>🇳🇱</strong> {currentWord.example_nl}
           </p>
           {currentWord.example_en && (
-            <p style={{ margin: "5px 0", color: "#666" }}>
-              <strong>English:</strong> {currentWord.example_en}
+            <p style={styles.exampleEN}>
+              <strong>🇬🇧</strong> {currentWord.example_en}
             </p>
           )}
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} style={styles.form}>
         <input
           type="text"
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
-          placeholder="Type Dutch translation"
-          style={{
-            padding: "12px",
-            fontSize: "18px",
-            width: "300px",
-            marginRight: "10px",
-          }}
+          placeholder="Scrivi la traduzione..."
+          style={styles.input}
           disabled={gameOver}
           autoFocus
         />
-        <button type="submit" disabled={gameOver}>
-          Submit
+        <button type="submit" style={styles.submitButton} disabled={gameOver}>
+          Invia
         </button>
       </form>
 
       {feedback && (
         <p
           style={{
-            fontSize: "20px",
-            marginTop: "20px",
-            color: feedback.includes("✅") ? "green" : "red",
+            ...styles.feedback,
+            color: feedback.includes("✅") ? "#10b981" : "#ef4444",
           }}
         >
           {feedback}
         </p>
       )}
 
-      <button
-        onClick={goBack}
-        style={{ marginTop: "30px" }}
-        disabled={gameOver}
-      >
-        Abandon Session
+      <button onClick={goBack} style={styles.abandonButton} disabled={gameOver}>
+        ← Abbandona Partita
       </button>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    padding: "40px 20px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  header: {
+    textAlign: "center",
+    marginBottom: "40px",
+  },
+  title: {
+    fontSize: "32px",
+    fontWeight: "700",
+    color: "#1e293b",
+    margin: "0 0 20px 0",
+  },
+  progressBar: {
+    height: "8px",
+    background: "#e5e7eb",
+    borderRadius: "10px",
+    overflow: "hidden",
+    maxWidth: "400px",
+    margin: "0 auto",
+  },
+  progressFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
+    transition: "width 0.3s ease",
+  },
+  stats: {
+    display: "flex",
+    justifyContent: "center",
+    gap: "40px",
+    marginBottom: "40px",
+    flexWrap: "wrap",
+  },
+  statItem: {
+    fontSize: "16px",
+    color: "#475569",
+    fontWeight: "500",
+  },
+  questionContainer: {
+    textAlign: "center",
+    marginBottom: "40px",
+  },
+  questionLabel: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0 0 10px 0",
+  },
+  questionText: {
+    fontSize: "18px",
+    color: "#64748b",
+    margin: "0 0 15px 0",
+    fontWeight: "500",
+  },
+  wordToTranslate: {
+    fontSize: "44px",
+    color: "#1e293b",
+    margin: "0",
+    fontWeight: "700",
+  },
+  exampleBox: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "20px",
+    maxWidth: "600px",
+    margin: "0 auto 30px",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  exampleNL: {
+    fontSize: "14px",
+    color: "#475569",
+    margin: "0 0 10px 0",
+  },
+  exampleEN: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0",
+  },
+  form: {
+    display: "flex",
+    gap: "10px",
+    justifyContent: "center",
+    marginBottom: "30px",
+    flexWrap: "wrap",
+  },
+  input: {
+    padding: "12px 16px",
+    fontSize: "16px",
+    border: "2px solid #e5e7eb",
+    borderRadius: "8px",
+    width: "300px",
+    transition: "all 0.3s ease",
+    fontFamily: "inherit",
+  },
+  submitButton: {
+    padding: "12px 32px",
+    fontSize: "16px",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+  },
+  feedback: {
+    fontSize: "18px",
+    fontWeight: "600",
+    margin: "20px 0",
+    minHeight: "30px",
+  },
+  abandonButton: {
+    padding: "12px 24px",
+    fontSize: "14px",
+    background: "#f3f4f6",
+    color: "#64748b",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    display: "block",
+    margin: "0 auto",
+  },
+  gameOverContainer: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "40px 20px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  gameOverTitle: {
+    fontSize: "48px",
+    color: "#1e293b",
+    margin: "0 0 40px 0",
+  },
+  statsContainer: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "20px",
+    maxWidth: "600px",
+    marginBottom: "40px",
+  },
+  statBox: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "24px",
+    textAlign: "center",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  statLabel: {
+    fontSize: "14px",
+    color: "#64748b",
+    margin: "0 0 10px 0",
+  },
+  statValue: {
+    fontSize: "32px",
+    fontWeight: "700",
+    color: "#1e293b",
+    margin: "0",
+  },
+  buttonContainer: {
+    display: "flex",
+    gap: "20px",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  primaryButton: {
+    padding: "14px 40px",
+    fontSize: "16px",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
+    transition: "all 0.3s ease",
+  },
+  secondaryButton: {
+    padding: "14px 40px",
+    fontSize: "16px",
+    fontWeight: "600",
+    background: "#f3f4f6",
+    color: "#475569",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+  },
+  loadingContainer: {
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+};
 
 export default Play;
