@@ -1,262 +1,382 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
-function Leaderboard({ goBack }) {
+function Leaderboard({ onUserClick, goBack }) {
+  const [activeTab, setActiveTab] = useState("allTime");
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [userRank, setUserRank] = useState(null);
+  const [medals, setMedals] = useState({});
 
   useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user) {
-          setCurrentUser(userData.user.id);
-        }
-
-        // Fetch all sessions grouped by user
-        const { data: sessions } = await supabase
-          .from("sessions")
-          .select("user_id, score, level");
-
-        if (sessions && sessions.length > 0) {
-          // Group by user and calculate stats
-          const userStats = {};
-          sessions.forEach((session) => {
-            if (!userStats[session.user_id]) {
-              userStats[session.user_id] = {
-                user_id: session.user_id,
-                totalScore: 0,
-                sessionsPlayed: 0,
-                bestLevel: 0,
-              };
-            }
-            userStats[session.user_id].totalScore += session.score;
-            userStats[session.user_id].sessionsPlayed += 1;
-            userStats[session.user_id].bestLevel = Math.max(
-              userStats[session.user_id].bestLevel,
-              session.level || 0
-            );
-          });
-
-          // Convert to array and sort by score
-          const sortedLeaderboard = Object.values(userStats)
-            .sort((a, b) => b.totalScore - a.totalScore)
-            .slice(0, 50); // Top 50
-
-          setLeaderboard(sortedLeaderboard);
-
-          // Find current user rank
-          const rank = sortedLeaderboard.findIndex(
-            (u) => u.user_id === userData?.user?.id
-          );
-          if (rank !== -1) {
-            setUserRank(rank + 1);
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching leaderboard:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchLeaderboard();
-  }, []);
+    fetchMedals();
+  }, [activeTab]);
 
-  if (loading) {
-    return (
-      <div style={styles.loadingContainer}>
-        <h1>Loading...</h1>
-      </div>
-    );
-  }
+  const fetchMedals = async () => {
+    try {
+      const { data: weeklyMedals, error: weeklyError } = await supabase
+        .from("weekly_medals")
+        .select("user_id, medal_type");
+
+      const { data: monthlyMedals, error: monthlyError } = await supabase
+        .from("monthly_medals")
+        .select("user_id, medal_type");
+
+      if (!weeklyError && !monthlyError) {
+        const medalCounts = {};
+        [...(weeklyMedals || []), ...(monthlyMedals || [])].forEach((medal) => {
+          if (!medalCounts[medal.user_id]) {
+            medalCounts[medal.user_id] = { gold: 0, silver: 0, bronze: 0 };
+          }
+          medalCounts[medal.user_id][medal.medal_type]++;
+        });
+        setMedals(medalCounts);
+      }
+    } catch (error) {
+      console.error("Error fetching medals:", error);
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from("sessions")
+        .select("*")
+        .order("score", { ascending: false });
+
+      if (activeTab === "thisWeek") {
+        const weekStart = getWeekStart();
+        query = query.gte("created_at", weekStart.toISOString());
+      } else if (activeTab === "thisMonth") {
+        const monthStart = getMonthStart();
+        query = query.gte("created_at", monthStart.toISOString());
+      }
+
+      const { data, error } = await query.limit(50);
+
+      if (error) throw error;
+
+      // Group by user_id and calculate stats
+      const userStats = {};
+      data?.forEach((session) => {
+        const userId = session.user_id;
+        if (!userStats[userId]) {
+          userStats[userId] = {
+            user_id: userId,
+            totalScore: 0,
+            sessionsPlayed: 0,
+            bestLevel: 0,
+            highestScore: 0,
+          };
+        }
+        userStats[userId].totalScore += session.score;
+        userStats[userId].sessionsPlayed += 1;
+        userStats[userId].bestLevel = Math.max(
+          userStats[userId].bestLevel,
+          session.level || 0
+        );
+        userStats[userId].highestScore = Math.max(
+          userStats[userId].highestScore,
+          session.score
+        );
+      });
+
+      // Convert to array and sort by total score
+      const leaderboardData = Object.values(userStats)
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .slice(0, 10);
+
+      console.log("Leaderboard data:", leaderboardData);
+      setLeaderboard(leaderboardData);
+    } catch (error) {
+      console.error("Error fetching leaderboard:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getWeekStart = () => {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(today.setDate(diff));
+  };
+
+  const getMonthStart = () => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  };
+
+  const getMedalEmoji = (rank) => {
+    if (rank === 0) return "🥇";
+    if (rank === 1) return "🥈";
+    if (rank === 2) return "🥉";
+    return `#${rank + 1}`;
+  };
+
+  const styles = {
+    container: {
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+      padding: "40px 20px",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    },
+    header: {
+      textAlign: "center",
+      color: "white",
+      marginBottom: "40px",
+    },
+    title: {
+      fontSize: "48px",
+      fontWeight: "bold",
+      margin: "0 0 10px 0",
+      textShadow: "0 2px 10px rgba(0,0,0,0.3)",
+    },
+    subtitle: {
+      fontSize: "16px",
+      color: "#06b6d4",
+      margin: "0",
+    },
+    tabsContainer: {
+      display: "flex",
+      gap: "10px",
+      justifyContent: "center",
+      marginBottom: "30px",
+      flexWrap: "wrap",
+    },
+    tab: (isActive) => ({
+      padding: "12px 24px",
+      fontSize: "14px",
+      fontWeight: "600",
+      border: "none",
+      borderRadius: "8px",
+      cursor: "pointer",
+      background: isActive
+        ? "linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)"
+        : "rgba(255,255,255,0.1)",
+      color: "white",
+      transition: "all 0.3s ease",
+      boxShadow: isActive ? "0 4px 15px rgba(6,182,212,0.4)" : "none",
+    }),
+    listContainer: {
+      maxWidth: "700px",
+      margin: "0 auto",
+    },
+    card: {
+      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+      border: "1px solid rgba(6,182,212,0.2)",
+      borderRadius: "12px",
+      padding: "20px",
+      marginBottom: "16px",
+      cursor: "pointer",
+      transition: "all 0.3s ease",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+      display: "flex",
+      alignItems: "center",
+      gap: "20px",
+    },
+    rank: {
+      fontSize: "32px",
+      fontWeight: "bold",
+      minWidth: "60px",
+      textAlign: "center",
+      color: "#06b6d4",
+    },
+    userInfo: {
+      flex: 1,
+      color: "white",
+    },
+    username: {
+      fontSize: "18px",
+      fontWeight: "700",
+      margin: "0 0 8px 0",
+      color: "#f0f9ff",
+    },
+    stats: {
+      fontSize: "13px",
+      color: "#bfdbfe",
+      margin: "0",
+      display: "flex",
+      gap: "16px",
+      flexWrap: "wrap",
+    },
+    score: {
+      fontSize: "24px",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      minWidth: "100px",
+      textAlign: "right",
+    },
+    medalContainer: {
+      display: "flex",
+      gap: "8px",
+      alignItems: "center",
+      marginLeft: "10px",
+    },
+    medal: {
+      fontSize: "18px",
+      display: "flex",
+      alignItems: "center",
+      gap: "4px",
+    },
+    medalCount: {
+      fontSize: "12px",
+      color: "#06b6d4",
+      fontWeight: "600",
+    },
+    emptyState: {
+      textAlign: "center",
+      color: "#06b6d4",
+      padding: "40px 20px",
+      fontSize: "16px",
+    },
+    backButton: {
+      display: "inline-block",
+      marginTop: "40px",
+      padding: "12px 24px",
+      backgroundColor: "rgba(255,255,255,0.1)",
+      color: "white",
+      border: "1px solid #06b6d4",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "600",
+      transition: "all 0.3s ease",
+      textAlign: "center",
+    },
+  };
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>🏆 Leaderboard</h1>
-        <p style={styles.subtitle}>Top Players</p>
+        <h1 style={styles.title}>🏆 LEADERBOARD</h1>
+        <p style={styles.subtitle}>
+          {activeTab === "allTime"
+            ? "All-Time Champions"
+            : activeTab === "thisWeek"
+            ? "This Week's Stars"
+            : "This Month's Heroes"}
+        </p>
       </div>
 
-      {currentUser && userRank && (
-        <div style={styles.userRankCard}>
-          <p style={styles.userRankText}>
-            Your Rank: <strong>#{userRank}</strong>
-          </p>
-        </div>
-      )}
+      <div style={styles.tabsContainer}>
+        <button
+          style={styles.tab(activeTab === "allTime")}
+          onClick={() => setActiveTab("allTime")}
+        >
+          ⭐ All Time
+        </button>
+        <button
+          style={styles.tab(activeTab === "thisWeek")}
+          onClick={() => setActiveTab("thisWeek")}
+        >
+          📅 This Week
+        </button>
+        <button
+          style={styles.tab(activeTab === "thisMonth")}
+          onClick={() => setActiveTab("thisMonth")}
+        >
+          📆 This Month
+        </button>
+      </div>
 
-      <div style={styles.tableContainer}>
-        <table style={styles.table}>
-          <thead>
-            <tr style={styles.headerRow}>
-              <th style={styles.cellRank}>#</th>
-              <th style={styles.cellName}>Player</th>
-              <th style={styles.cellScore}>Score</th>
-              <th style={styles.cellLevel}>Best Level</th>
-              <th style={styles.cellSessions}>Sessions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leaderboard.map((user, index) => (
-              <tr
-                key={user.user_id}
-                style={{
-                  ...styles.row,
-                  backgroundColor:
-                    user.user_id === currentUser ? "#f0f7ff" : "white",
+      <div style={styles.listContainer}>
+        {loading ? (
+          <div style={styles.emptyState}>Loading leaderboard...</div>
+        ) : leaderboard.length === 0 ? (
+          <div style={styles.emptyState}>
+            No scores yet. Be the first to play! 🎮
+          </div>
+        ) : (
+          leaderboard.map((entry, index) => {
+            const userMedals = medals[entry.user_id] || {
+              gold: 0,
+              silver: 0,
+              bronze: 0,
+            };
+
+            return (
+              <div
+                key={index}
+                style={styles.card}
+                onClick={() =>
+                  onUserClick(
+                    entry.user_id,
+                    `Player ${entry.user_id.slice(0, 8)}`
+                  )
+                }
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-4px)";
+                  e.currentTarget.style.boxShadow =
+                    "0 8px 25px rgba(6,182,212,0.3)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "none";
+                  e.currentTarget.style.boxShadow =
+                    "0 4px 15px rgba(0,0,0,0.2)";
                 }}
               >
-                <td style={styles.cellRank}>
-                  <span style={styles.rankMedal}>
-                    {index === 0
-                      ? "🥇"
-                      : index === 1
-                      ? "🥈"
-                      : index === 2
-                      ? "🥉"
-                      : `${index + 1}`}
-                  </span>
-                </td>
-                <td style={styles.cellName}>
-                  Player {user.user_id.slice(0, 8).toUpperCase()}
-                </td>
-                <td style={styles.cellScore}>
-                  <strong>{user.totalScore}</strong>
-                </td>
-                <td style={styles.cellLevel}>{user.bestLevel}</td>
-                <td style={styles.cellSessions}>{user.sessionsPlayed}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                <div style={styles.rank}>{getMedalEmoji(index)}</div>
+
+                <div style={styles.userInfo}>
+                  <h3 style={styles.username}>
+                    Player {entry.user_id.slice(0, 8).toUpperCase()}
+                  </h3>
+                  <p style={styles.stats}>
+                    <span>📊 Score: {entry.totalScore?.toLocaleString()}</span>
+                    <span>📈 Level: {entry.bestLevel}</span>
+                    <span>🎮 Sessions: {entry.sessionsPlayed}</span>
+                  </p>
+                </div>
+
+                <div style={styles.score}>
+                  {entry.totalScore?.toLocaleString()}
+                </div>
+
+                {(userMedals.gold > 0 ||
+                  userMedals.silver > 0 ||
+                  userMedals.bronze > 0) && (
+                  <div style={styles.medalContainer}>
+                    {userMedals.gold > 0 && (
+                      <div style={styles.medal}>
+                        <span>🥇</span>
+                        <span style={styles.medalCount}>
+                          {userMedals.gold}
+                        </span>
+                      </div>
+                    )}
+                    {userMedals.silver > 0 && (
+                      <div style={styles.medal}>
+                        <span>🥈</span>
+                        <span style={styles.medalCount}>
+                          {userMedals.silver}
+                        </span>
+                      </div>
+                    )}
+                    {userMedals.bronze > 0 && (
+                      <div style={styles.medal}>
+                        <span>🥉</span>
+                        <span style={styles.medalCount}>
+                          {userMedals.bronze}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
 
-      <button onClick={goBack} style={styles.backButton}>
-        ← Back to Home
-      </button>
+      <div style={{ textAlign: "center" }}>
+        <button style={styles.backButton} onClick={goBack}>
+          ← Back to Menu
+        </button>
+      </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "40px 20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-  header: {
-    textAlign: "center",
-    marginBottom: "40px",
-  },
-  title: {
-    fontSize: "48px",
-    fontWeight: "700",
-    color: "#1e293b",
-    margin: "0 0 10px 0",
-  },
-  subtitle: {
-    fontSize: "16px",
-    color: "#64748b",
-    margin: "0",
-    fontWeight: "400",
-  },
-  userRankCard: {
-    background: "white",
-    border: "2px solid #3b82f6",
-    borderRadius: "12px",
-    padding: "20px",
-    maxWidth: "600px",
-    margin: "0 auto 30px",
-    textAlign: "center",
-    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.1)",
-  },
-  userRankText: {
-    fontSize: "18px",
-    color: "#1e293b",
-    margin: "0",
-    fontWeight: "600",
-  },
-  tableContainer: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    overflow: "hidden",
-    maxWidth: "800px",
-    margin: "0 auto 40px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: "14px",
-  },
-  headerRow: {
-    background: "#f8f9fa",
-    borderBottom: "2px solid #e5e7eb",
-  },
-  row: {
-    borderBottom: "1px solid #e5e7eb",
-    transition: "background-color 0.3s ease",
-  },
-  cellRank: {
-    padding: "16px",
-    textAlign: "center",
-    fontWeight: "600",
-    color: "#1e293b",
-    width: "60px",
-  },
-  cellName: {
-    padding: "16px",
-    textAlign: "left",
-    color: "#475569",
-    fontWeight: "500",
-  },
-  cellScore: {
-    padding: "16px",
-    textAlign: "center",
-    color: "#1e293b",
-    fontWeight: "600",
-  },
-  cellLevel: {
-    padding: "16px",
-    textAlign: "center",
-    color: "#475569",
-  },
-  cellSessions: {
-    padding: "16px",
-    textAlign: "center",
-    color: "#475569",
-  },
-  rankMedal: {
-    fontSize: "20px",
-    marginRight: "4px",
-  },
-  backButton: {
-    display: "block",
-    margin: "0 auto",
-    padding: "12px 24px",
-    fontSize: "14px",
-    fontWeight: "600",
-    background: "#f3f4f6",
-    color: "#64748b",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-  },
-  loadingContainer: {
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-};
 
 export default Leaderboard;
