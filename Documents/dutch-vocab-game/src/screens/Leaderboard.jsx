@@ -8,8 +8,31 @@ function Leaderboard({ onUserClick, goBack }) {
   const [medals, setMedals] = useState({});
 
   useEffect(() => {
+    // Fetch immediatamente quando il tab cambia
     fetchLeaderboard();
     fetchMedals();
+
+    // Auto-refresh ogni 3 secondi
+    const interval = setInterval(() => {
+      fetchLeaderboard();
+      fetchMedals();
+    }, 3000);
+
+    // Refresh quando la pagina diventa visibile (user torna dal Play)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchLeaderboard();
+        fetchMedals();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Cleanup
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [activeTab]);
 
   const fetchMedals = async () => {
