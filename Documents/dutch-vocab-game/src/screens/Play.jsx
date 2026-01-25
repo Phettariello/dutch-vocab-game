@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
+
 function Play({ goBack }) {
   const [words, setWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -18,7 +19,9 @@ function Play({ goBack }) {
   const [usedWordIds, setUsedWordIds] = useState(new Set());
   const [questionsInLevel, setQuestionsInLevel] = useState(0);
 
+
   const QUESTIONS_PER_LEVEL = 10;
+
 
   const fetchWordsForLevel = async (levelNumber) => {
     try {
@@ -31,7 +34,9 @@ function Play({ goBack }) {
         maxDifficulty = 5;
       }
 
+
       const randomOffset = Math.floor(Math.random() * 50);
+
 
       let { data, error } = await supabase
         .from("words")
@@ -39,7 +44,9 @@ function Play({ goBack }) {
         .lte("difficulty", maxDifficulty)
         .range(randomOffset, randomOffset + 9);
 
+
       if (error) throw error;
+
 
       if (!data || data.length < 10) {
         const { data: allData, error: allError } = await supabase
@@ -48,13 +55,16 @@ function Play({ goBack }) {
           .lte("difficulty", maxDifficulty)
           .limit(10);
 
+
         if (allError) throw allError;
         data = allData;
       }
 
+
       // Filter out already used words
       const availableWords = data.filter((w) => !usedWordIds.has(w.id));
       const shuffled = availableWords.sort(() => Math.random() - 0.5);
+
 
       return shuffled.length > 0 ? shuffled : data.sort(() => Math.random() - 0.5);
     } catch (error) {
@@ -62,6 +72,7 @@ function Play({ goBack }) {
       throw error;
     }
   };
+
 
   useEffect(() => {
     const initializeGame = async () => {
@@ -80,8 +91,10 @@ function Play({ goBack }) {
       }
     };
 
+
     initializeGame();
   }, []);
+
 
   if (loading) {
     return (
@@ -90,6 +103,7 @@ function Play({ goBack }) {
       </div>
     );
   }
+
 
   if (words.length === 0) {
     return (
@@ -100,11 +114,14 @@ function Play({ goBack }) {
     );
   }
 
+
   const currentWord = words[currentIndex];
+
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
+
 
     const normalize = (str) => {
       return str
@@ -119,11 +136,13 @@ function Play({ goBack }) {
         .replace(/\s+/g, " ");
     };
 
+
     const correctFull = currentWord.dutch.toLowerCase().trim();
     const correctBase = correctFull
       .split(",")[0]
       .replace(/^(de |het |een |het )/, "")
       .trim();
+
 
     const normalizedAnswer = normalize(userAnswer);
     const normalizedFull = normalize(correctFull);
@@ -131,17 +150,21 @@ function Play({ goBack }) {
     const normalizedWithDe = normalize(`de ${correctBase}`);
     const normalizedWithHet = normalize(`het ${correctBase}`);
 
+
     const isCorrect =
       normalizedAnswer === normalizedFull ||
       normalizedAnswer === normalizedBase ||
       normalizedAnswer === normalizedWithDe ||
       normalizedAnswer === normalizedWithHet;
 
+
     let newScore = score;
     let newStreak = streak;
     let newLives = lives;
 
+
     const wordPoints = currentWord.difficulty || 1;
+
 
     if (isCorrect) {
       newScore += wordPoints;
@@ -157,9 +180,11 @@ function Play({ goBack }) {
       setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
     }
 
+
     const newUsedWords = new Set(usedWordIds);
     newUsedWords.add(currentWord.id);
     setUsedWordIds(newUsedWords);
+
 
     const newSessionResult = {
       word: currentWord.english,
@@ -168,6 +193,7 @@ function Play({ goBack }) {
       level: currentLevel,
     };
 
+
     setSessionResults([...sessionResults, newSessionResult]);
     setAllSessionResults([...allSessionResults, newSessionResult]);
     setScore(newScore);
@@ -175,8 +201,10 @@ function Play({ goBack }) {
     setStreak(newStreak);
     setAnswer("");
 
+
     const newQuestionsInLevel = questionsInLevel + 1;
     setQuestionsInLevel(newQuestionsInLevel);
+
 
     if (newLives <= 0) {
       setTimeout(() => {
@@ -199,14 +227,17 @@ function Play({ goBack }) {
     }
   };
 
+
   const nextLevel = async (levelScore) => {
     const nextLevelNumber = currentLevel + 1;
+
 
     if (nextLevelNumber > 100) {
       setTotalSessionScore(totalSessionScore + levelScore);
       setGameOver(true);
       return;
     }
+
 
     try {
       setLoading(true);
@@ -230,11 +261,13 @@ function Play({ goBack }) {
     }
   };
 
+
   const saveSessionAuto = async (finalScore, results) => {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user.id;
       const correctCount = results.filter((r) => r.correct).length;
+
 
       const { error: sessionError } = await supabase.from("sessions").insert([
         {
@@ -242,15 +275,16 @@ function Play({ goBack }) {
           score: finalScore,
           correct_answers: correctCount,
           total_words: results.length,
-          level: currentLevel,
           ended_at: new Date(),
         },
       ]);
+
 
       if (sessionError) {
         console.error("Session save error:", sessionError);
         return;
       }
+
 
       const uniqueWords = new Map();
       for (const result of results) {
@@ -260,12 +294,15 @@ function Play({ goBack }) {
         uniqueWords.get(result.word).push(result.correct);
       }
 
+
       for (const [wordEnglish, correctArray] of uniqueWords) {
         const word = words.find((w) => w.english === wordEnglish);
         if (!word) continue;
 
+
         const correctCount = correctArray.filter((c) => c).length;
         const incorrectCount = correctArray.filter((c) => !c).length;
+
 
         const { data: existingProgress, error: fetchError } = await supabase
           .from("user_progress")
@@ -274,10 +311,12 @@ function Play({ goBack }) {
           .eq("word_id", word.id)
           .single();
 
+
         if (fetchError && fetchError.code !== "PGRST116") {
           console.error("Fetch error:", fetchError);
           continue;
         }
+
 
         if (existingProgress) {
           const newCorrectCount =
@@ -285,6 +324,7 @@ function Play({ goBack }) {
           const newIncorrectCount =
             existingProgress.incorrect_count + incorrectCount;
           const isMastered = newCorrectCount >= 10;
+
 
           await supabase
             .from("user_progress")
@@ -309,15 +349,18 @@ function Play({ goBack }) {
         }
       }
 
+
       console.log("Session saved automatically!");
     } catch (error) {
       console.error("Error saving session:", error);
     }
   };
 
+
   const startNewGame = () => {
     window.location.reload();
   };
+
 
   // Render hearts based on lives
   const renderHearts = () => {
@@ -332,12 +375,14 @@ function Play({ goBack }) {
     return hearts;
   };
 
+
   if (gameOver) {
     const correctCount = allSessionResults.filter((r) => r.correct).length;
     const finalScore = totalSessionScore + score;
     const accuracy = allSessionResults.length > 0 
       ? Math.round((correctCount / allSessionResults.length) * 100)
       : 0;
+
 
     return (
       <div style={styles.gameOverContainer}>
@@ -372,6 +417,7 @@ function Play({ goBack }) {
     );
   }
 
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -389,6 +435,7 @@ function Play({ goBack }) {
         </div>
       </div>
 
+
       <div style={styles.stats}>
         <div style={styles.statItem}>
           <span>📊</span> Score: <strong>{totalSessionScore + score}</strong>
@@ -398,6 +445,7 @@ function Play({ goBack }) {
         </div>
       </div>
 
+
       <div style={styles.questionContainer}>
         <p style={styles.questionLabel}>
           Question {questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
@@ -405,6 +453,7 @@ function Play({ goBack }) {
         <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
       </div>
+
 
       {currentWord.example_nl && (
         <div style={styles.exampleBox}>
@@ -418,6 +467,7 @@ function Play({ goBack }) {
           )}
         </div>
       )}
+
 
       <form onSubmit={handleSubmit} style={styles.form}>
         <input
@@ -434,6 +484,7 @@ function Play({ goBack }) {
         </button>
       </form>
 
+
       {feedback && (
         <p
           style={{
@@ -445,12 +496,14 @@ function Play({ goBack }) {
         </p>
       )}
 
+
       <button onClick={goBack} style={styles.exitButton} disabled={gameOver}>
         ← Exit
       </button>
     </div>
   );
 }
+
 
 const styles = {
   container: {
@@ -677,5 +730,6 @@ const styles = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
 };
+
 
 export default Play;
