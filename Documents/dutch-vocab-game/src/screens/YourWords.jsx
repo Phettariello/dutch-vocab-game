@@ -602,7 +602,7 @@ const styles = {
   },
   tableHeader: {
     display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
+    gridTemplateColumns: "1.2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 0.8fr",
     gap: "8px",
     padding: "12px",
     background: "rgba(6,182,212,0.1)",
@@ -614,6 +614,7 @@ const styles = {
     position: "sticky",
     top: 0,
     zIndex: 10,
+    alignItems: "center",
   },
   tableBody: {
     display: "flex",
@@ -622,9 +623,9 @@ const styles = {
   },
   tableRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
+    gridTemplateColumns: "1.2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 0.8fr",
     gap: "8px",
-    padding: "10px 12px",
+    padding: "12px",
     background: "linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(124, 58, 237, 0.3) 100%)",
     border: "1px solid rgba(6,182,212,0.15)",
     borderRadius: "6px",
@@ -644,6 +645,7 @@ const styles = {
   colMastery: {
     display: "flex",
     justifyContent: "center",
+    alignItems: "center",
   },
   masteryBadge: {
     padding: "4px 8px",
