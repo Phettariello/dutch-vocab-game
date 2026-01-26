@@ -3,19 +3,41 @@ import { supabase } from "../supabaseClient";
 
 function YourWords({ goBack }) {
   const [words, setWords] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [selectedDifficulty, setSelectedDifficulty] = useState("all");
-  const [categories, setCategories] = useState([]);
   const [filteredWords, setFilteredWords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState(new Set());
+  const [selectedDifficulties, setSelectedDifficulties] = useState(new Set());
+  const [categories, setCategories] = useState([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Stats states
+  const [stats, setStats] = useState({
+    total: 0,
+    mastered: 0,
+    learning: 0,
+    accuracy: 0,
+  });
+
+  // ============================================================================
+  // EFFECT: Load words with progress and calculate stats
+  // ============================================================================
   useEffect(() => {
     const fetchWords = async () => {
       setLoading(true);
       try {
         const { data: userData } = await supabase.auth.getUser();
-        const userId = userData.user.id;
+        const userId = userData.user?.id;
 
+        if (!userId) {
+          alert("You must be logged in.");
+          goBack();
+          return;
+        }
+
+        // 1. Fetch user_progress with word details
         const { data: progressData, error: progressError } = await supabase
           .from("user_progress")
           .select("*")
@@ -23,7 +45,7 @@ function YourWords({ goBack }) {
 
         if (progressError) throw progressError;
 
-        // Fetch dettagli parole
+        // 2. Fetch word details for each progress entry
         const progressWithWords = await Promise.all(
           (progressData || []).map(async (progress) => {
             const { data: word } = await supabase
@@ -35,19 +57,44 @@ function YourWords({ goBack }) {
           })
         );
 
+        // 3. Calculate mastery percent for each word
         const withPercentage = (progressWithWords || []).map((p) => {
           const total = p.correct_count + p.incorrect_count;
-          const errorPercentage = total > 0 ? (p.incorrect_count / total) * 100 : 0;
-          return { ...p, errorPercentage, total };
+          const masteryPercent =
+            total > 0
+              ? Math.round((p.correct_count / total) * 100)
+              : 0;
+          return { ...p, masteryPercent, total };
         });
 
-        withPercentage.sort((a, b) => b.errorPercentage - a.errorPercentage);
-
-        // Estrai categorie uniche
+        // 4. Extract unique categories and initialize all as selected
         const uniqueCategories = [
           ...new Set(withPercentage.map((p) => p.words.category)),
         ].sort();
         setCategories(uniqueCategories);
+        setSelectedCategories(new Set(uniqueCategories));
+
+        // 5. Initialize all difficulties (1-10) as selected
+        setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+
+        // 6. Calculate overall stats
+        const mastered = withPercentage.filter((w) => w.mastered).length;
+        const totalCorrect = withPercentage.reduce(
+          (sum, w) => sum + w.correct_count,
+          0
+        );
+        const totalAttempts = withPercentage.reduce((sum, w) => sum + w.total, 0);
+        const accuracy =
+          totalAttempts > 0
+            ? Math.round((totalCorrect / totalAttempts) * 100)
+            : 0;
+
+        setStats({
+          total: withPercentage.length,
+          mastered,
+          learning: withPercentage.length - mastered,
+          accuracy,
+        });
 
         setWords(withPercentage);
         setFilteredWords(withPercentage);
@@ -62,228 +109,68 @@ function YourWords({ goBack }) {
     fetchWords();
   }, []);
 
-  // Filtra parole quando cambiano i filtri
+  // ============================================================================
+  // EFFECT: Apply filters (search + categories + difficulty)
+  // ============================================================================
   useEffect(() => {
     let filtered = words;
 
-    if (selectedCategory !== "all") {
-      filtered = filtered.filter((w) => w.words.category === selectedCategory);
+    // Search filter (English or Dutch)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(
+        (w) =>
+          w.words.english.toLowerCase().includes(query) ||
+          w.words.dutch.toLowerCase().includes(query)
+      );
     }
 
-    if (selectedDifficulty !== "all") {
-      const diff = parseInt(selectedDifficulty);
-      filtered = filtered.filter((w) => w.words.difficulty === diff);
+    // Category filter
+    if (selectedCategories.size > 0) {
+      filtered = filtered.filter((w) =>
+        selectedCategories.has(w.words.category)
+      );
+    }
+
+    // Difficulty filter
+    if (selectedDifficulties.size > 0) {
+      filtered = filtered.filter((w) =>
+        selectedDifficulties.has(w.words.difficulty)
+      );
     }
 
     setFilteredWords(filtered);
-  }, [selectedCategory, selectedDifficulty, words]);
+  }, [searchQuery, selectedCategories, selectedDifficulties, words]);
 
-  const stats = {
-    total: words.length,
-    mastered: words.filter((w) => w.mastered).length,
-    learning: words.filter((w) => !w.mastered).length,
+  // ============================================================================
+  // FUNCTION: Toggle category checkbox
+  // ============================================================================
+  const toggleCategory = (cat) => {
+    const newSet = new Set(selectedCategories);
+    if (newSet.has(cat)) {
+      newSet.delete(cat);
+    } else {
+      newSet.add(cat);
+    }
+    setSelectedCategories(newSet);
   };
 
-  const styles = {
-    container: {
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "20px",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    },
-    header: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: "30px",
-      position: "sticky",
-      top: 0,
-      zIndex: 100,
-      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "20px 0",
-    },
-    title: {
-      fontSize: "36px",
-      fontWeight: "800",
-      margin: 0,
-      color: "white",
-      textShadow: "0 2px 10px rgba(6,182,212,0.4)",
-    },
-    backButton: {
-      padding: "12px 24px",
-      backgroundColor: "#06b6d4",
-      color: "#0f172a",
-      border: "none",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: "600",
-      transition: "all 0.3s ease",
-    },
-    statsContainer: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-      gap: "16px",
-      marginBottom: "30px",
-      maxWidth: "1000px",
-      margin: "0 auto 30px",
-    },
-    statCard: {
-      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
-      border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "12px",
-      padding: "20px",
-      textAlign: "center",
-      color: "white",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-    },
-    statValue: {
-      fontSize: "32px",
-      fontWeight: "bold",
-      color: "#fbbf24",
-      margin: "0 0 8px 0",
-    },
-    statLabel: {
-      fontSize: "12px",
-      color: "#bfdbfe",
-      margin: 0,
-      textTransform: "uppercase",
-      fontWeight: "600",
-    },
-    filterContainer: {
-      maxWidth: "1000px",
-      margin: "0 auto 30px",
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      gap: "16px",
-    },
-    filterGroup: {
-      display: "flex",
-      flexDirection: "column",
-      gap: "8px",
-    },
-    filterLabel: {
-      color: "#06b6d4",
-      fontWeight: "700",
-      fontSize: "13px",
-      textTransform: "uppercase",
-    },
-    filterSelect: {
-      padding: "10px 12px",
-      borderRadius: "8px",
-      border: "1px solid rgba(6,182,212,0.3)",
-      background: "rgba(30, 58, 138, 0.8)",
-      color: "white",
-      fontSize: "14px",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-    },
-    contentContainer: {
-      maxWidth: "1000px",
-      margin: "0 auto",
-    },
-    cardsGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-      gap: "16px",
-      marginBottom: "40px",
-    },
-    card: {
-      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
-      border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "12px",
-      padding: "20px",
-      color: "white",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      transition: "all 0.3s ease",
-      cursor: "pointer",
-    },
-    cardHeader: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "start",
-      marginBottom: "12px",
-      gap: "12px",
-    },
-    cardTitle: {
-      fontSize: "18px",
-      fontWeight: "700",
-      margin: "0 0 4px 0",
-      color: "#f0f9ff",
-    },
-    cardSubtitle: {
-      fontSize: "14px",
-      color: "#bfdbfe",
-      margin: 0,
-      fontWeight: "500",
-    },
-    errorBadge: {
-      backgroundColor: "#ef4444",
-      color: "white",
-      padding: "8px 16px",
-      borderRadius: "8px",
-      fontWeight: "bold",
-      fontSize: "14px",
-      minWidth: "80px",
-      textAlign: "center",
-    },
-    warningBadge: {
-      backgroundColor: "#f97316",
-      color: "white",
-      padding: "8px 16px",
-      borderRadius: "8px",
-      fontWeight: "bold",
-      fontSize: "14px",
-      minWidth: "80px",
-      textAlign: "center",
-    },
-    successBadge: {
-      backgroundColor: "#22c55e",
-      color: "white",
-      padding: "8px 16px",
-      borderRadius: "8px",
-      fontWeight: "bold",
-      fontSize: "14px",
-      minWidth: "80px",
-      textAlign: "center",
-    },
-    cardStats: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
-      gap: "8px",
-      marginBottom: "12px",
-      fontSize: "12px",
-    },
-    statItem: {
-      background: "rgba(255,255,255,0.1)",
-      padding: "8px",
-      borderRadius: "6px",
-      textAlign: "center",
-      color: "#bfdbfe",
-    },
-    cardMeta: {
-      display: "flex",
-      gap: "12px",
-      fontSize: "12px",
-      color: "#bfdbfe",
-      borderTop: "1px solid rgba(6,182,212,0.2)",
-      paddingTop: "12px",
-      marginTop: "12px",
-    },
-    emptyState: {
-      textAlign: "center",
-      color: "#06b6d4",
-      padding: "40px 20px",
-      fontSize: "16px",
-    },
-    loadingState: {
-      textAlign: "center",
-      color: "#06b6d4",
-      padding: "40px 20px",
-      fontSize: "16px",
-    },
+  // ============================================================================
+  // FUNCTION: Toggle difficulty checkbox
+  // ============================================================================
+  const toggleDifficulty = (diff) => {
+    const newSet = new Set(selectedDifficulties);
+    if (newSet.has(diff)) {
+      newSet.delete(diff);
+    } else {
+      newSet.add(diff);
+    }
+    setSelectedDifficulties(newSet);
   };
 
+  // ============================================================================
+  // LOADING STATE
+  // ============================================================================
   if (loading) {
     return (
       <div style={styles.container}>
@@ -298,8 +185,12 @@ function YourWords({ goBack }) {
     );
   }
 
+  // ============================================================================
+  // MAIN RENDER
+  // ============================================================================
   return (
     <div style={styles.container}>
+      {/* HEADER - STICKY */}
       <div style={styles.header}>
         <h1 style={styles.title}>📖 YOUR WORDS</h1>
         <button
@@ -314,11 +205,11 @@ function YourWords({ goBack }) {
             e.currentTarget.style.transform = "scale(1)";
           }}
         >
-          ← Back to Menu
+          ← Back
         </button>
       </div>
 
-      {/* Stats */}
+      {/* STATS GRID */}
       <div style={styles.statsContainer}>
         <div style={styles.statCard}>
           <p style={styles.statValue}>{stats.total}</p>
@@ -330,61 +221,94 @@ function YourWords({ goBack }) {
         </div>
         <div style={styles.statCard}>
           <p style={styles.statValue}>{stats.learning}</p>
-          <p style={styles.statLabel}>⚠️ Learning</p>
+          <p style={styles.statLabel}>🎯 Learning</p>
+        </div>
+        <div style={styles.statCard}>
+          <p style={styles.statValue}>{stats.accuracy}%</p>
+          <p style={styles.statLabel}>📊 Accuracy</p>
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={styles.filterContainer}>
-        <div style={styles.filterGroup}>
-          <label style={styles.filterLabel}>Category</label>
-          <select
-            style={styles.filterSelect}
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-          >
-            <option value="all">All Categories</option>
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={styles.filterGroup}>
-          <label style={styles.filterLabel}>Difficulty</label>
-          <select
-            style={styles.filterSelect}
-            value={selectedDifficulty}
-            onChange={(e) => setSelectedDifficulty(e.target.value)}
-          >
-            <option value="all">All Levels</option>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-              <option key={level} value={level}>
-                Level {level}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* SEARCH BAR */}
+      <div style={styles.searchContainer}>
+        <input
+          type="text"
+          placeholder="Search by English or Dutch..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={styles.searchInput}
+        />
       </div>
 
+      {/* FILTERS TOGGLE */}
+      <div style={styles.filtersPanel}>
+        <button
+          onClick={() => setFiltersOpen(!filtersOpen)}
+          style={styles.filterToggle}
+        >
+          🔧 Filters {filtersOpen ? "▼" : "▶"}
+        </button>
+
+        {filtersOpen && (
+          <div style={styles.filtersContent}>
+            {/* Categories */}
+            <div style={styles.filterGroup}>
+              <h4 style={styles.filterTitle}>Categories</h4>
+              <div style={styles.checkboxGroup}>
+                {categories.map((cat) => (
+                  <label key={cat} style={styles.checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={selectedCategories.has(cat)}
+                      onChange={() => toggleCategory(cat)}
+                      style={styles.checkbox}
+                    />
+                    {cat}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div style={styles.filterGroup}>
+              <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+              <div style={styles.difficultyGrid}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                  <label key={level} style={styles.checkboxLabelSmall}>
+                    <input
+                      type="checkbox"
+                      checked={selectedDifficulties.has(level)}
+                      onChange={() => toggleDifficulty(level)}
+                      style={styles.checkbox}
+                    />
+                    {level}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* WORDS GRID */}
       <div style={styles.contentContainer}>
         {filteredWords.length === 0 ? (
           <div style={styles.emptyState}>
-            No words found with the selected filters. Try adjusting your selection!
+            <p>No words found with current filters.</p>
+            <p>Try adjusting your search or filters!</p>
           </div>
         ) : (
           <>
             <div style={styles.cardsGrid}>
-              {filteredWords.map((progress, index) => {
-                let badge;
-                if (progress.mastered) {
-                  badge = styles.successBadge;
-                } else if (progress.errorPercentage > 50) {
-                  badge = styles.errorBadge;
-                } else {
-                  badge = styles.warningBadge;
+              {filteredWords.map((progress) => {
+                // Determine badge color
+                let badge = styles.successBadge; // Default mastered
+                if (!progress.mastered) {
+                  if (progress.masteryPercent >= 60) {
+                    badge = styles.warningBadge; // 60-99%
+                  } else {
+                    badge = styles.errorBadge; // 0-59%
+                  }
                 }
 
                 return (
@@ -392,18 +316,19 @@ function YourWords({ goBack }) {
                     key={progress.id}
                     style={styles.card}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "translateY(-4px)";
+                      e.currentTarget.style.transform = "translateY(-2px)";
                       e.currentTarget.style.boxShadow =
-                        "0 8px 25px rgba(6,182,212,0.3)";
+                        "0 6px 20px rgba(6,182,212,0.25)";
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.transform = "none";
                       e.currentTarget.style.boxShadow =
-                        "0 4px 15px rgba(0,0,0,0.2)";
+                        "0 2px 8px rgba(0,0,0,0.1)";
                     }}
                   >
+                    {/* Card Header */}
                     <div style={styles.cardHeader}>
-                      <div style={{ flex: 1 }}>
+                      <div style={styles.cardWords}>
                         <h3 style={styles.cardTitle}>
                           {progress.words.english}
                         </h3>
@@ -412,66 +337,38 @@ function YourWords({ goBack }) {
                         </p>
                       </div>
                       <div style={badge}>
-                        {progress.mastered ? (
-                          "✅ MASTERED"
-                        ) : (
-                          `${progress.errorPercentage.toFixed(0)}%`
-                        )}
+                        {progress.mastered ? "✅" : `${progress.masteryPercent}%`}
                       </div>
                     </div>
 
+                    {/* Card Stats */}
                     <div style={styles.cardStats}>
-                      <div style={styles.statItem}>
-                        ✅ {progress.correct_count}
+                      <div style={styles.statItemSmall}>
+                        <span style={styles.statLabel}>✅</span>
+                        {progress.correct_count}
                       </div>
-                      <div style={styles.statItem}>
-                        ❌ {progress.incorrect_count}
+                      <div style={styles.statItemSmall}>
+                        <span style={styles.statLabel}>❌</span>
+                        {progress.incorrect_count}
                       </div>
-                      <div style={styles.statItem}>
-                        Total: {progress.total}
+                      <div style={styles.statItemSmall}>
+                        <span style={styles.statLabel}>📊</span>
+                        {progress.total}
                       </div>
                     </div>
 
+                    {/* Card Meta */}
                     <div style={styles.cardMeta}>
                       <span>📁 {progress.words.category}</span>
-                      <span>📊 Level {progress.words.difficulty}/10</span>
+                      <span>📈 Lvl {progress.words.difficulty}</span>
                     </div>
-
-                    {progress.words.example_nl && (
-                      <div
-                        style={{
-                          background: "rgba(255,255,255,0.05)",
-                          padding: "10px",
-                          borderRadius: "6px",
-                          marginTop: "12px",
-                          fontSize: "12px",
-                          lineHeight: "1.4",
-                          borderLeft: "3px solid #06b6d4",
-                        }}
-                      >
-                        <p style={{ margin: "0 0 4px 0" }}>
-                          <strong>NL:</strong> {progress.words.example_nl}
-                        </p>
-                        {progress.words.example_en && (
-                          <p style={{ margin: 0, color: "#bfdbfe" }}>
-                            <strong>EN:</strong> {progress.words.example_en}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
                 );
               })}
             </div>
 
-            <div
-              style={{
-                textAlign: "center",
-                color: "#bfdbfe",
-                marginBottom: "20px",
-                fontSize: "14px",
-              }}
-            >
+            {/* Results counter */}
+            <div style={styles.resultCounter}>
               Showing {filteredWords.length} of {stats.total} words
             </div>
           </>
@@ -480,5 +377,317 @@ function YourWords({ goBack }) {
     </div>
   );
 }
+
+// ============================================================================
+// STYLES - MOBILE OPTIMIZED
+// ============================================================================
+const styles = {
+  container: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    padding: "0",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    display: "flex",
+    flexDirection: "column",
+  },
+  header: {
+    position: "sticky",
+    top: 0,
+    zIndex: 100,
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "16px 20px",
+    borderBottom: "1px solid rgba(6,182,212,0.2)",
+  },
+  title: {
+    fontSize: "clamp(20px, 5vw, 32px)",
+    fontWeight: "800",
+    margin: 0,
+    color: "white",
+    textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+  },
+  backButton: {
+    padding: "8px 16px",
+    backgroundColor: "#06b6d4",
+    color: "#0f172a",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    marginLeft: "12px",
+  },
+  statsContainer: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+    gap: "12px",
+    padding: "16px",
+    maxWidth: "1000px",
+    margin: "0 auto",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  statCard: {
+    background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+    border: "1px solid rgba(6,182,212,0.2)",
+    borderRadius: "10px",
+    padding: "14px 12px",
+    textAlign: "center",
+    color: "white",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+    minHeight: "90px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+  },
+  statValue: {
+    fontSize: "clamp(24px, 5vw, 32px)",
+    fontWeight: "bold",
+    color: "#fbbf24",
+    margin: "0 0 6px 0",
+  },
+  statLabel: {
+    fontSize: "clamp(10px, 2vw, 12px)",
+    color: "#bfdbfe",
+    margin: 0,
+    textTransform: "uppercase",
+    fontWeight: "600",
+  },
+  searchContainer: {
+    padding: "0 16px 12px 16px",
+    maxWidth: "1000px",
+    margin: "0 auto",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  searchInput: {
+    width: "100%",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "1px solid rgba(6,182,212,0.3)",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
+    fontSize: "clamp(13px, 3vw, 14px)",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+    transition: "all 0.2s ease",
+  },
+  filtersPanel: {
+    padding: "0 16px 12px 16px",
+    maxWidth: "1000px",
+    margin: "0 auto",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  filterToggle: {
+    width: "100%",
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.1)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
+    fontWeight: "600",
+    cursor: "pointer",
+    color: "#bfdbfe",
+    transition: "all 0.2s ease",
+  },
+  filtersContent: {
+    marginTop: "8px",
+    background: "rgba(30, 58, 138, 0.8)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    padding: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  filterGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  filterTitle: {
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#06b6d4",
+    margin: "0",
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  checkboxGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  difficultyGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(5, 1fr)",
+    gap: "6px",
+  },
+  checkboxLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  checkboxLabelSmall: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#bfdbfe",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  checkbox: {
+    width: "14px",
+    height: "14px",
+    cursor: "pointer",
+    accentColor: "#06b6d4",
+  },
+  contentContainer: {
+    flex: 1,
+    padding: "16px",
+    maxWidth: "1000px",
+    margin: "0 auto",
+    width: "100%",
+    boxSizing: "border-box",
+    overflowY: "auto",
+  },
+  cardsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+    gap: "12px",
+    marginBottom: "20px",
+  },
+  card: {
+    background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+    border: "1px solid rgba(6,182,212,0.2)",
+    borderRadius: "10px",
+    padding: "14px",
+    color: "white",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+    transition: "all 0.2s ease",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "8px",
+  },
+  cardWords: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardTitle: {
+    fontSize: "clamp(13px, 3vw, 15px)",
+    fontWeight: "700",
+    margin: "0",
+    color: "#f0f9ff",
+    wordBreak: "break-word",
+  },
+  cardSubtitle: {
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    color: "#bfdbfe",
+    margin: "4px 0 0 0",
+    fontWeight: "500",
+    wordBreak: "break-word",
+  },
+  successBadge: {
+    backgroundColor: "#22c55e",
+    color: "white",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontWeight: "bold",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
+    minWidth: "50px",
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  warningBadge: {
+    backgroundColor: "#f97316",
+    color: "white",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontWeight: "bold",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
+    minWidth: "50px",
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  errorBadge: {
+    backgroundColor: "#ef4444",
+    color: "white",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontWeight: "bold",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
+    minWidth: "50px",
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  cardStats: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "6px",
+  },
+  statItemSmall: {
+    background: "rgba(255,255,255,0.1)",
+    padding: "6px 8px",
+    borderRadius: "4px",
+    textAlign: "center",
+    color: "#bfdbfe",
+    fontSize: "clamp(10px, 2vw, 12px)",
+    fontWeight: "600",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "2px",
+  },
+  cardMeta: {
+    display: "flex",
+    gap: "8px",
+    fontSize: "clamp(9px, 2vw, 11px)",
+    color: "#bfdbfe",
+    borderTop: "1px solid rgba(6,182,212,0.2)",
+    paddingTop: "8px",
+    marginTop: "8px",
+    flexWrap: "wrap",
+  },
+  emptyState: {
+    textAlign: "center",
+    color: "#06b6d4",
+    padding: "40px 20px",
+    fontSize: "clamp(14px, 3vw, 16px)",
+  },
+  loadingState: {
+    textAlign: "center",
+    color: "#06b6d4",
+    padding: "40px 20px",
+    fontSize: "clamp(14px, 3vw, 16px)",
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resultCounter: {
+    textAlign: "center",
+    color: "#bfdbfe",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    padding: "12px 0",
+    fontWeight: "500",
+  },
+};
 
 export default YourWords;

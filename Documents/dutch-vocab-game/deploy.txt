@@ -1,0 +1,5 @@
+cd C:\Users\GGS\Documents\dutch-vocab-game
+git add .
+git commit -m "Auto deploy: %date% %time%"
+git push origin main
+vercel --prod --force
