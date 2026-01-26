@@ -7,32 +7,25 @@ function Achievements({ goBack, userId }) {
     bestScore: 0,
     totalPoints: 0,
     bestLevel: 0,
-    averageScore: 0,
+    maxCorrectAnswers: 0,
+    wordsMastered: 0,
     totalWeeklyGold: 0,
     totalWeeklySilver: 0,
     totalWeeklyBronze: 0,
     totalMonthlyGold: 0,
     totalMonthlySilver: 0,
     totalMonthlyBronze: 0,
-    winRate: 0,
-    totalWords: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [medalHistory, setMedalHistory] = useState([]);
-  const [debugInfo, setDebugInfo] = useState("");
+  const [topResults, setTopResults] = useState([]);
 
+  // ============================================================================
+  // EFFECT: Fetch all achievements data
+  // ============================================================================
   useEffect(() => {
-    console.log("Achievements component mounted");
-    console.log("userId received:", userId);
-    console.log("userId type:", typeof userId);
-    
     if (userId && String(userId).trim().length > 0) {
-      console.log("✅ userId is valid, fetching...");
-      setDebugInfo(`userId: ${userId}`);
       fetchAchievements();
     } else {
-      console.warn("❌ userId is undefined, null, or empty!");
-      setDebugInfo(`❌ ERROR: userId is invalid (${userId})`);
       setLoading(false);
     }
   }, [userId]);
@@ -40,115 +33,83 @@ function Achievements({ goBack, userId }) {
   const fetchAchievements = async () => {
     setLoading(true);
     try {
-      console.log("🔄 Fetching achievements for userId:", userId);
-
-      // Test: Fetch ALL sessions first
-      const { data: allSessions, error: allError } = await supabase
+      // 1. Fetch user sessions (Play mode)
+      const { data: sessions } = await supabase
         .from("sessions")
         .select("*")
-        .limit(5);
+        .eq("user_id", userId)
+        .order("score", { ascending: false });
 
-      console.log("📊 All sessions in DB (first 5):", allSessions?.length || 0, allSessions);
-
-      if (allError) {
-        console.error("❌ Error fetching all sessions:", allError);
-      }
-
-      // Now fetch user-specific sessions
-      console.log("🔍 Querying user sessions with userId:", userId);
-      
-      const { data: sessions, error } = await supabase
-        .from("sessions")
+      // 2. Fetch user word progress (mastered words)
+      const { data: progressData } = await supabase
+        .from("user_progress")
         .select("*")
         .eq("user_id", userId);
 
-      console.log("👤 User sessions found:", sessions?.length || 0);
-      console.log("📋 Session data:", sessions);
-      console.log("⚠️ Query error:", error);
+      // 3. Fetch weekly medals
+      const { data: weeklyMedals } = await supabase
+        .from("weekly_medals")
+        .select("medal_type")
+        .eq("user_id", userId);
 
-      if (error) {
-        console.error("❌ Error fetching sessions:", error);
-        setDebugInfo(`❌ Query Error: ${error.message}`);
-        setLoading(false);
-        return;
-      }
+      // 4. Fetch monthly medals
+      const { data: monthlyMedals } = await supabase
+        .from("monthly_medals")
+        .select("medal_type")
+        .eq("user_id", userId);
 
+      // Calculate statistics
+      const totalGames = sessions?.length || 0;
+      const bestScore = Math.max(...(sessions?.map((s) => s.score || 0) || [0]));
+      const totalPoints = sessions?.reduce((sum, s) => sum + (s.score || 0), 0) || 0;
+      const bestLevel = Math.max(...(sessions?.map((s) => s.level || 0) || [0]));
+      const maxCorrectAnswers = Math.max(
+        ...(sessions?.map((s) => s.correct_answers || 0) || [0])
+      );
+
+      // Words mastered (where mastered = true)
+      const wordsMastered = progressData?.filter((w) => w.mastered).length || 0;
+
+      // Count medals
+      let weeklyCount = { gold: 0, silver: 0, bronze: 0 };
+      let monthlyCount = { gold: 0, silver: 0, bronze: 0 };
+
+      weeklyMedals?.forEach((m) => {
+        weeklyCount[m.medal_type]++;
+      });
+      monthlyMedals?.forEach((m) => {
+        monthlyCount[m.medal_type]++;
+      });
+
+      setStats({
+        totalGames,
+        bestScore,
+        totalPoints,
+        bestLevel,
+        maxCorrectAnswers,
+        wordsMastered,
+        totalWeeklyGold: weeklyCount.gold,
+        totalWeeklySilver: weeklyCount.silver,
+        totalWeeklyBronze: weeklyCount.bronze,
+        totalMonthlyGold: monthlyCount.gold,
+        totalMonthlySilver: monthlyCount.silver,
+        totalMonthlyBronze: monthlyCount.bronze,
+      });
+
+      // Top 10 results
       if (sessions && sessions.length > 0) {
-        console.log("✅ Sessions found! Processing data...");
-        
-        const bestScore = Math.max(...sessions.map((s) => s.score || 0));
-        const bestLevel = Math.max(...sessions.map((s) => s.level || 0));
-        const totalPoints = sessions.reduce((sum, s) => sum + (s.score || 0), 0);
-        const avgScore = Math.round(totalPoints / sessions.length);
-        const totalWords = sessions.reduce((sum, s) => sum + (s.total_words || 0), 0);
-        const correctWords = sessions.reduce((sum, s) => sum + (s.correct_answers || 0), 0);
-        const winRate = totalWords > 0 ? Math.round((correctWords / totalWords) * 100) : 0;
-
-        console.log("📈 Stats calculated:", {
-          totalGames: sessions.length,
-          bestScore,
-          totalPoints,
-          bestLevel,
-          avgScore,
-          winRate,
-        });
-
-        const { data: weeklyMedals } = await supabase
-          .from("weekly_medals")
-          .select("medal_type, created_at")
-          .eq("user_id", userId);
-
-        const { data: monthlyMedals } = await supabase
-          .from("monthly_medals")
-          .select("medal_type, created_at")
-          .eq("user_id", userId);
-
-        let weeklyCount = { gold: 0, silver: 0, bronze: 0 };
-        let monthlyCount = { gold: 0, silver: 0, bronze: 0 };
-
-        weeklyMedals?.forEach((m) => {
-          weeklyCount[m.medal_type]++;
-        });
-        monthlyMedals?.forEach((m) => {
-          monthlyCount[m.medal_type]++;
-        });
-
-        const allMedals = [
-          ...(weeklyMedals || []).map((m) => ({
-            ...m,
-            type: "weekly",
-          })),
-          ...(monthlyMedals || []).map((m) => ({
-            ...m,
-            type: "monthly",
-          })),
-        ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-        setStats({
-          totalGames: sessions.length,
-          bestScore,
-          totalPoints,
-          bestLevel,
-          averageScore: avgScore,
-          totalWeeklyGold: weeklyCount.gold,
-          totalWeeklySilver: weeklyCount.silver,
-          totalWeeklyBronze: weeklyCount.bronze,
-          totalMonthlyGold: monthlyCount.gold,
-          totalMonthlySilver: monthlyCount.silver,
-          totalMonthlyBronze: monthlyCount.bronze,
-          winRate,
-          totalWords,
-        });
-
-        setMedalHistory(allMedals);
-        setDebugInfo("✅ Data loaded successfully!");
-      } else {
-        console.warn("⚠️ No sessions found for user:", userId);
-        setDebugInfo("⚠️ No game sessions found for this user");
+        const topSessions = sessions.slice(0, 10).map((s) => ({
+          score: s.score,
+          level: s.level,
+          correctAnswers: s.correct_answers,
+          totalWords: s.total_words,
+          category: s.category || "General",
+          createdAt: s.created_at,
+        }));
+        setTopResults(topSessions);
       }
     } catch (error) {
-      console.error("❌ Error fetching achievements:", error);
-      setDebugInfo(`❌ Exception: ${error.message}`);
+      console.error("Error fetching achievements:", error);
     } finally {
       setLoading(false);
     }
@@ -157,8 +118,18 @@ function Achievements({ goBack, userId }) {
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
   };
@@ -167,215 +138,228 @@ function Achievements({ goBack, userId }) {
     container: {
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "16px 16px 40px 16px",
+      padding: "0",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      paddingTop: "60px",
+      display: "flex",
+      flexDirection: "column",
     },
     header: {
-      textAlign: "center",
-      color: "white",
-      marginBottom: "24px",
+      position: "sticky",
+      top: 0,
+      zIndex: 100,
+      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "16px 20px",
+      borderBottom: "1px solid rgba(6,182,212,0.2)",
     },
     title: {
-      fontSize: "clamp(28px, 7vw, 48px)",
-      fontWeight: "bold",
-      margin: "0 0 8px 0",
-      textShadow: "0 2px 10px rgba(0,0,0,0.3)",
-    },
-    subtitle: {
-      fontSize: "clamp(13px, 3vw, 16px)",
-      color: "#06b6d4",
-      margin: "0",
-    },
-    debugBox: {
-      background: "rgba(239, 68, 68, 0.2)",
-      border: "1px solid #ef4444",
-      color: "#ff6b6b",
-      padding: "12px",
-      borderRadius: "8px",
-      marginBottom: "16px",
-      fontSize: "clamp(11px, 2vw, 12px)",
-      fontFamily: "monospace",
-      textAlign: "center",
-      wordBreak: "break-all",
-    },
-    backButtonTop: {
-      position: "fixed",
-      top: "16px",
-      right: "16px",
-      padding: "10px 16px",
-      backgroundColor: "rgba(255,255,255,0.1)",
+      fontSize: "clamp(20px, 5vw, 32px)",
+      fontWeight: "800",
+      margin: 0,
       color: "white",
-      border: "1px solid #06b6d4",
-      borderRadius: "8px",
+      textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+    },
+    backButton: {
+      padding: "8px 16px",
+      backgroundColor: "#06b6d4",
+      color: "#0f172a",
+      border: "none",
+      borderRadius: "6px",
       cursor: "pointer",
       fontSize: "clamp(12px, 2.5vw, 14px)",
       fontWeight: "600",
-      transition: "all 0.3s ease",
-      zIndex: 1000,
-      backdropFilter: "blur(10px)",
+      transition: "all 0.2s ease",
+      whiteSpace: "nowrap",
+      flexShrink: 0,
+      marginLeft: "12px",
     },
     contentContainer: {
-      maxWidth: "900px",
+      flex: 1,
+      padding: "16px",
+      maxWidth: "1000px",
       margin: "0 auto",
+      width: "100%",
+      boxSizing: "border-box",
+      overflowY: "auto",
     },
     section: {
       marginBottom: "28px",
     },
     sectionTitle: {
-      fontSize: "clamp(18px, 4vw, 24px)",
+      fontSize: "clamp(14px, 3vw, 16px)",
       fontWeight: "700",
       color: "#06b6d4",
-      margin: "0 0 16px 0",
+      margin: "0 0 12px 0",
       textTransform: "uppercase",
-      letterSpacing: "1px",
-      borderBottom: "2px solid rgba(6,182,212,0.3)",
+      letterSpacing: "0.5px",
+      borderBottom: "1px solid rgba(6,182,212,0.2)",
       paddingBottom: "8px",
     },
     statGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+      gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
       gap: "12px",
-      marginBottom: "24px",
+      marginBottom: "16px",
     },
     statCard: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "12px",
-      padding: "16px",
-      textAlign: "center",
-      color: "white",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      transition: "all 0.3s ease",
-    },
-    statCardHighlight: {
-      background: "linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)",
-      borderColor: "rgba(251, 191, 36, 0.5)",
-    },
-    statValue: {
-      fontSize: "clamp(24px, 5vw, 36px)",
-      fontWeight: "bold",
-      color: "#fbbf24",
-      margin: "0 0 6px 0",
-    },
-    statValueHighlight: {
-      color: "#78350f",
-    },
-    statLabel: {
-      fontSize: "clamp(11px, 2.5vw, 13px)",
-      color: "#bfdbfe",
-      margin: "0",
-      textTransform: "uppercase",
-      fontWeight: "600",
-      letterSpacing: "0.5px",
-    },
-    statLabelHighlight: {
-      color: "#78350f",
-    },
-    medalGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-      gap: "10px",
-    },
-    medalCard: {
-      background: "rgba(6,182,212,0.1)",
-      border: "2px solid rgba(6,182,212,0.3)",
-      borderRadius: "8px",
+      borderRadius: "10px",
       padding: "12px",
       textAlign: "center",
       color: "white",
-      transition: "all 0.3s ease",
-    },
-    medalType: {
-      fontSize: "clamp(10px, 2vw, 12px)",
-      color: "#06b6d4",
-      fontWeight: "600",
-      textTransform: "uppercase",
-      marginBottom: "6px",
-    },
-    medalContent: {
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: "6px",
-      fontSize: "clamp(18px, 4vw, 24px)",
-      marginBottom: "6px",
-    },
-    medalCount: {
-      fontSize: "clamp(16px, 3vw, 20px)",
-      fontWeight: "bold",
-      color: "#fbbf24",
-    },
-    medalLabel: {
-      fontSize: "clamp(10px, 2vw, 12px)",
-      color: "#bfdbfe",
-      margin: "0",
-    },
-    medalHistory: {
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
       display: "flex",
       flexDirection: "column",
-      gap: "10px",
+      justifyContent: "center",
     },
-    medalHistoryItem: {
-      background: "rgba(6,182,212,0.1)",
+    statValue: {
+      fontSize: "clamp(18px, 4vw, 24px)",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      margin: "0 0 4px 0",
+    },
+    statLabel: {
+      fontSize: "clamp(10px, 2vw, 12px)",
+      color: "#bfdbfe",
+      margin: 0,
+      textTransform: "uppercase",
+      fontWeight: "600",
+    },
+    medalSection: {
+      background: "rgba(6,182,212,0.08)",
       border: "1px solid rgba(6,182,212,0.2)",
       borderRadius: "8px",
       padding: "12px",
-      display: "flex",
-      alignItems: "center",
-      gap: "10px",
-      color: "white",
+      marginBottom: "12px",
     },
-    medalHistoryEmoji: {
-      fontSize: "clamp(20px, 5vw, 28px)",
-      minWidth: "40px",
-      textAlign: "center",
-    },
-    medalHistoryInfo: {
-      flex: 1,
-    },
-    medalHistoryType: {
-      fontSize: "clamp(12px, 2.5vw, 14px)",
-      fontWeight: "600",
+    medalSectionTitle: {
+      fontSize: "clamp(11px, 2vw, 12px)",
       color: "#06b6d4",
-      margin: "0 0 2px 0",
+      fontWeight: "600",
+      margin: "0 0 8px 0",
       textTransform: "uppercase",
     },
-    medalHistoryDate: {
+    medalRow: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: "8px",
+    },
+    medalCard: {
+      background: "rgba(6,182,212,0.1)",
+      border: "1px solid rgba(6,182,212,0.2)",
+      borderRadius: "6px",
+      padding: "8px",
+      textAlign: "center",
+      color: "white",
+    },
+    medalEmoji: {
+      fontSize: "clamp(16px, 3vw, 20px)",
+      marginBottom: "4px",
+    },
+    medalCount: {
+      fontSize: "clamp(14px, 3vw, 16px)",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      margin: "0",
+    },
+    medalLabel: {
+      fontSize: "clamp(9px, 2vw, 10px)",
+      color: "#bfdbfe",
+      margin: "2px 0 0 0",
+      textTransform: "uppercase",
+    },
+    tableHeader: {
+      display: "grid",
+      gridTemplateColumns: "1fr 0.8fr 1fr 1fr 1fr",
+      gap: "8px",
+      padding: "10px 12px",
+      background: "rgba(6,182,212,0.1)",
+      borderRadius: "6px 6px 0 0",
+      borderBottom: "1px solid rgba(6,182,212,0.3)",
+      fontWeight: "600",
+      fontSize: "clamp(10px, 2vw, 11px)",
+      color: "#06b6d4",
+      alignItems: "center",
+    },
+    tableBody: {
+      display: "flex",
+      flexDirection: "column",
+      gap: "1px",
+    },
+    tableRow: {
+      display: "grid",
+      gridTemplateColumns: "1fr 0.8fr 1fr 1fr 1fr",
+      gap: "8px",
+      padding: "10px 12px",
+      background: "linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(124, 58, 237, 0.3) 100%)",
+      border: "1px solid rgba(6,182,212,0.15)",
+      borderRadius: "6px",
+      alignItems: "center",
       fontSize: "clamp(10px, 2vw, 12px)",
       color: "#bfdbfe",
-      margin: "0",
+    },
+    colScore: {
+      fontWeight: "600",
+      color: "#fbbf24",
+    },
+    colLevel: {
+      textAlign: "center",
+      fontWeight: "600",
+    },
+    colCorrect: {
+      textAlign: "center",
+    },
+    colCategory: {
+      textAlign: "center",
+      fontSize: "clamp(9px, 2vw, 10px)",
+    },
+    colDate: {
+      textAlign: "center",
+      fontSize: "clamp(9px, 2vw, 10px)",
     },
     emptyState: {
       textAlign: "center",
       color: "#06b6d4",
       padding: "30px 16px",
-      fontSize: "clamp(13px, 3vw, 16px)",
+      fontSize: "clamp(13px, 3vw, 14px)",
+    },
+    loadingState: {
+      textAlign: "center",
+      color: "#06b6d4",
+      padding: "40px 20px",
+      fontSize: "clamp(14px, 3vw, 16px)",
+      flex: 1,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
     },
   };
 
   if (!userId) {
     return (
       <div style={styles.container}>
-        <button
-          style={styles.backButtonTop}
-          onClick={goBack}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(6, 182, 212, 0.2)";
-            e.currentTarget.style.transform = "scale(1.05)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-            e.currentTarget.style.transform = "scale(1)";
-          }}
-        >
-          ← Menu
-        </button>
         <div style={styles.header}>
           <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
+          <button
+            style={styles.backButton}
+            onClick={goBack}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#0891b2";
+              e.currentTarget.style.transform = "scale(1.05)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#06b6d4";
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
+            ← Menu
+          </button>
         </div>
-        <div style={styles.debugBox}>
-          ❌ ERROR: userId not passed to component!
+        <div style={styles.loadingState}>
+          ❌ Error: userId not available
         </div>
       </div>
     );
@@ -383,35 +367,29 @@ function Achievements({ goBack, userId }) {
 
   return (
     <div style={styles.container}>
-      <button
-        style={styles.backButtonTop}
-        onClick={goBack}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(6, 182, 212, 0.2)";
-          e.currentTarget.style.transform = "scale(1.05)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-          e.currentTarget.style.transform = "scale(1)";
-        }}
-      >
-        ← Menu
-      </button>
-
+      {/* HEADER - STICKY */}
       <div style={styles.header}>
         <h1 style={styles.title}>🎖️ MY ACHIEVEMENTS</h1>
-        <p style={styles.subtitle}>Your Gaming Journey</p>
+        <button
+          style={styles.backButton}
+          onClick={goBack}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
       </div>
 
+      {/* CONTENT */}
       <div style={styles.contentContainer}>
-        {debugInfo && (
-          <div style={styles.debugBox}>
-            {debugInfo}
-          </div>
-        )}
-
         {loading ? (
-          <div style={styles.emptyState}>Loading achievements...</div>
+          <div style={styles.loadingState}>Loading achievements...</div>
         ) : (
           <>
             {/* STATISTICS */}
@@ -422,16 +400,12 @@ function Achievements({ goBack, userId }) {
                   <p style={styles.statValue}>{stats.totalGames}</p>
                   <p style={styles.statLabel}>Games Played</p>
                 </div>
-                <div style={{ ...styles.statCard, ...styles.statCardHighlight }}>
-                  <p style={{ ...styles.statValue, ...styles.statValueHighlight }}>
-                    {stats.totalPoints.toLocaleString()}
-                  </p>
-                  <p style={{ ...styles.statLabel, ...styles.statLabelHighlight }}>
-                    Total Points
-                  </p>
+                <div style={styles.statCard}>
+                  <p style={styles.statValue}>{stats.totalPoints.toLocaleString()}</p>
+                  <p style={styles.statLabel}>Total Points</p>
                 </div>
                 <div style={styles.statCard}>
-                  <p style={styles.statValue}>{stats.bestScore.toLocaleString()}</p>
+                  <p style={styles.statValue}>{stats.bestScore}</p>
                   <p style={styles.statLabel}>Best Score</p>
                 </div>
                 <div style={styles.statCard}>
@@ -439,16 +413,12 @@ function Achievements({ goBack, userId }) {
                   <p style={styles.statLabel}>Best Level</p>
                 </div>
                 <div style={styles.statCard}>
-                  <p style={styles.statValue}>{stats.averageScore.toLocaleString()}</p>
-                  <p style={styles.statLabel}>Avg Score</p>
+                  <p style={styles.statValue}>{stats.maxCorrectAnswers}</p>
+                  <p style={styles.statLabel}>Max Correct</p>
                 </div>
                 <div style={styles.statCard}>
-                  <p style={styles.statValue}>{stats.winRate}%</p>
-                  <p style={styles.statLabel}>Accuracy</p>
-                </div>
-                <div style={styles.statCard}>
-                  <p style={styles.statValue}>{stats.totalWords}</p>
-                  <p style={styles.statLabel}>Words Learned</p>
+                  <p style={styles.statValue}>{stats.wordsMastered}</p>
+                  <p style={styles.statLabel}>Words Mastered</p>
                 </div>
               </div>
             </div>
@@ -456,109 +426,84 @@ function Achievements({ goBack, userId }) {
             {/* MEDALS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>🥇 Medals Earned</h2>
-              <div style={styles.medalGrid}>
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Weekly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥇</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalWeeklyGold}
-                    </span>
-                  </div>
-                  <p style={styles.medalLabel}>Gold</p>
-                </div>
 
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Weekly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥈</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalWeeklySilver}
-                    </span>
+              {/* Weekly Medals */}
+              <div style={styles.medalSection}>
+                <p style={styles.medalSectionTitle}>📅 Weekly Medals</p>
+                <div style={styles.medalRow}>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥇</div>
+                    <p style={styles.medalCount}>{stats.totalWeeklyGold}</p>
+                    <p style={styles.medalLabel}>Gold</p>
                   </div>
-                  <p style={styles.medalLabel}>Silver</p>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥈</div>
+                    <p style={styles.medalCount}>{stats.totalWeeklySilver}</p>
+                    <p style={styles.medalLabel}>Silver</p>
+                  </div>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥉</div>
+                    <p style={styles.medalCount}>{stats.totalWeeklyBronze}</p>
+                    <p style={styles.medalLabel}>Bronze</p>
+                  </div>
                 </div>
+              </div>
 
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Weekly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥉</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalWeeklyBronze}
-                    </span>
+              {/* Monthly Medals */}
+              <div style={styles.medalSection}>
+                <p style={styles.medalSectionTitle}>📆 Monthly Medals</p>
+                <div style={styles.medalRow}>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥇</div>
+                    <p style={styles.medalCount}>{stats.totalMonthlyGold}</p>
+                    <p style={styles.medalLabel}>Gold</p>
                   </div>
-                  <p style={styles.medalLabel}>Bronze</p>
-                </div>
-
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Monthly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥇</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalMonthlyGold}
-                    </span>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥈</div>
+                    <p style={styles.medalCount}>{stats.totalMonthlySilver}</p>
+                    <p style={styles.medalLabel}>Silver</p>
                   </div>
-                  <p style={styles.medalLabel}>Gold</p>
-                </div>
-
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Monthly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥈</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalMonthlySilver}
-                    </span>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥉</div>
+                    <p style={styles.medalCount}>{stats.totalMonthlyBronze}</p>
+                    <p style={styles.medalLabel}>Bronze</p>
                   </div>
-                  <p style={styles.medalLabel}>Silver</p>
-                </div>
-
-                <div style={styles.medalCard}>
-                  <div style={styles.medalType}>Monthly</div>
-                  <div style={styles.medalContent}>
-                    <span>🥉</span>
-                    <span style={styles.medalCount}>
-                      {stats.totalMonthlyBronze}
-                    </span>
-                  </div>
-                  <p style={styles.medalLabel}>Bronze</p>
                 </div>
               </div>
             </div>
 
-            {/* MEDAL TIMELINE */}
-            {medalHistory.length > 0 && (
+            {/* TOP RESULTS */}
+            {topResults.length > 0 && (
               <div style={styles.section}>
-                <h2 style={styles.sectionTitle}>📅 Medal Timeline</h2>
-                <div style={styles.medalHistory}>
-                  {medalHistory.slice(0, 10).map((medal, index) => {
-                    const medalEmoji =
-                      medal.medal_type === "gold"
-                        ? "🥇"
-                        : medal.medal_type === "silver"
-                        ? "🥈"
-                        : "🥉";
-                    const medalLabel =
-                      medal.medal_type.charAt(0).toUpperCase() +
-                      medal.medal_type.slice(1);
-
-                    return (
-                      <div key={index} style={styles.medalHistoryItem}>
-                        <div style={styles.medalHistoryEmoji}>
-                          {medalEmoji}
-                        </div>
-                        <div style={styles.medalHistoryInfo}>
-                          <p style={styles.medalHistoryType}>
-                            {medalLabel}{" "}
-                            {medal.type === "weekly" ? "Weekly" : "Monthly"}
-                          </p>
-                          <p style={styles.medalHistoryDate}>
-                            {formatDate(medal.created_at)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <h2 style={styles.sectionTitle}>🏆 Top Results</h2>
+                <div style={styles.tableHeader}>
+                  <div>Score</div>
+                  <div style={{ textAlign: "center" }}>Level</div>
+                  <div style={{ textAlign: "center" }}>Correct</div>
+                  <div style={{ textAlign: "center" }}>Category</div>
+                  <div style={{ textAlign: "center" }}>Date</div>
                 </div>
+                <div style={styles.tableBody}>
+                  {topResults.map((result, index) => (
+                    <div key={index} style={styles.tableRow}>
+                      <div style={styles.colScore}>{result.score}</div>
+                      <div style={styles.colLevel}>{result.level}</div>
+                      <div style={styles.colCorrect}>
+                        {result.correctAnswers}/{result.totalWords}
+                      </div>
+                      <div style={styles.colCategory}>{result.category}</div>
+                      <div style={styles.colDate}>
+                        {formatDate(result.createdAt)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {topResults.length === 0 && !loading && (
+              <div style={styles.emptyState}>
+                <p>No game sessions yet. Start playing to see your results! 🎮</p>
               </div>
             )}
           </>
