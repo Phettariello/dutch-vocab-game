@@ -12,6 +12,7 @@ function Home() {
   console.log("DEBUG: Home render");
   const [screen, setScreen] = useState("menu");
   const [userId, setUserId] = useState(null);
+  const [selectedUserId, setSelectedUserId] = useState(null);
 
   React.useEffect(() => {
     const getUser = async () => {
@@ -27,12 +28,29 @@ function Home() {
     await supabase.auth.signOut();
   };
 
+  const handleUserClick = (clickedUserId, username) => {
+    setSelectedUserId(clickedUserId);
+    setScreen("achievements");
+  };
+
   if (screen === "play") return <Play goBack={() => setScreen("menu")} />;
   if (screen === "review") return <Review goBack={() => setScreen("menu")} />;
   if (screen === "practice") return <Practice goBack={() => setScreen("menu")} />;
   if (screen === "yourwords") return <YourWords goBack={() => setScreen("menu")} />;
-  if (screen === "leaderboard") return <Leaderboard goBack={() => setScreen("menu")} />;
-  if (screen === "achievements") return <Achievements goBack={() => setScreen("menu")} userId={userId} />;
+  if (screen === "leaderboard")
+    return (
+      <Leaderboard
+        goBack={() => setScreen("menu")}
+        onUserClick={handleUserClick}
+      />
+    );
+  if (screen === "achievements")
+    return (
+      <Achievements
+        goBack={() => setScreen("menu")}
+        userId={selectedUserId || userId}
+      />
+    );
   if (screen === "settings") return <Settings goBack={() => setScreen("menu")} />;
 
   // Menu principale

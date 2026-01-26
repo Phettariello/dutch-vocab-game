@@ -8,16 +8,21 @@ function Leaderboard({ onUserClick, goBack }) {
   const [medals, setMedals] = useState({});
   const [usernames, setUsernames] = useState({});
   const [userLevels, setUserLevels] = useState({});
+  const [medalLeaderboard, setMedalLeaderboard] = useState([]);
+  const [medalType, setMedalType] = useState("weekly"); // weekly or monthly
 
   // ============================================================================
   // EFFECT: Fetch on mount and tab change ONLY
   // ============================================================================
   useEffect(() => {
-    fetchLeaderboard();
-    fetchMedals();
-    fetchUserLevels();
-    // NO auto-refresh interval - only fetch on tab change
-  }, [activeTab]);
+    if (activeTab === "medals") {
+      fetchMedalLeaderboard();
+    } else {
+      fetchLeaderboard();
+      fetchMedals();
+      fetchUserLevels();
+    }
+  }, [activeTab, medalType]);
 
   // ============================================================================
   // FUNCTION: Calculate user level from words mastered
@@ -50,14 +55,15 @@ function Leaderboard({ onUserClick, goBack }) {
         .select("user_id, mastered");
 
       const levelMap = {};
-      progressData?.forEach((entry) => {
-        const wordsMastered = (progressData.filter(
-          (p) => p.user_id === entry.user_id && p.mastered
-        )).length;
-        if (!levelMap[entry.user_id]) {
-          levelMap[entry.user_id] = calculateLevel(wordsMastered);
-        }
+      const userIds = [...new Set(progressData?.map((p) => p.user_id) || [])];
+
+      userIds.forEach((userId) => {
+        const wordsMastered = progressData?.filter(
+          (p) => p.user_id === userId && p.mastered
+        ).length || 0;
+        levelMap[userId] = calculateLevel(wordsMastered);
       });
+
       setUserLevels(levelMap);
     } catch (error) {
       console.error("Error fetching user levels:", error);
@@ -93,6 +99,60 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
   // ============================================================================
+  // FUNCTION: Fetch medal leaderboard
+  // ============================================================================
+  const fetchMedalLeaderboard = async () => {
+    setLoading(true);
+    try {
+      const table = medalType === "weekly" ? "weekly_medals" : "monthly_medals";
+
+      const { data: medalData, error } = await supabase
+        .from(table)
+        .select("user_id, medal_type");
+
+      if (error) throw error;
+
+      const medalCounts = {};
+      medalData?.forEach((medal) => {
+        if (!medalCounts[medal.user_id]) {
+          medalCounts[medal.user_id] = { gold: 0, silver: 0, bronze: 0 };
+        }
+        medalCounts[medal.user_id][medal.medal_type]++;
+      });
+
+      const userIds = Object.keys(medalCounts);
+      const { data: profilesData } = await supabase
+        .from("profiles")
+        .select("user_id, username")
+        .in("user_id", userIds);
+
+      const usernamesMap = {};
+      profilesData?.forEach((profile) => {
+        usernamesMap[profile.user_id] = profile.username;
+      });
+
+      const combined = userIds
+        .map((userId) => {
+          const counts = medalCounts[userId];
+          const totalScore = counts.gold * 3 + counts.silver * 2 + counts.bronze;
+          return {
+            user_id: userId,
+            username: usernamesMap[userId] || `Player ${userId.slice(0, 8).toUpperCase()}`,
+            ...counts,
+            totalScore,
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+
+      setMedalLeaderboard(combined);
+    } catch (error) {
+      console.error("Error fetching medal leaderboard:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============================================================================
   // FUNCTION: Fetch leaderboard data
   // ============================================================================
   const fetchLeaderboard = async () => {
@@ -101,7 +161,10 @@ function Leaderboard({ onUserClick, goBack }) {
       let query = supabase.from("sessions").select("*");
 
       // Apply date filtering based on active tab
-      if (activeTab === "thisWeek") {
+      if (activeTab === "today") {
+        const todayStart = getTodayStart();
+        query = query.gte("created_at", todayStart.toISOString());
+      } else if (activeTab === "thisWeek") {
         const weekStart = getWeekStart();
         query = query.gte("created_at", weekStart.toISOString());
       } else if (activeTab === "thisMonth") {
@@ -172,6 +235,15 @@ function Leaderboard({ onUserClick, goBack }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ============================================================================
+  // FUNCTION: Get today start (00:00)
+  // ============================================================================
+  const getTodayStart = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
   };
 
   // ============================================================================
@@ -260,32 +332,54 @@ function Leaderboard({ onUserClick, goBack }) {
     subtitle: {
       fontSize: "clamp(12px, 2.5vw, 14px)",
       color: "#06b6d4",
-      margin: "16px 0 20px 0",
+      margin: "12px 0 16px 0",
       textAlign: "center",
       textTransform: "uppercase",
       letterSpacing: "0.5px",
     },
     tabsContainer: {
-      display: "flex",
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(80px, 1fr))",
       gap: "8px",
-      justifyContent: "center",
-      marginBottom: "24px",
-      flexWrap: "wrap",
+      marginBottom: "20px",
+      maxWidth: "700px",
+      margin: "0 auto 20px auto",
     },
     tab: (isActive) => ({
-      padding: "10px 16px",
-      fontSize: "clamp(11px, 2.5vw, 13px)",
+      padding: "9px 12px",
+      fontSize: "clamp(10px, 2.3vw, 12px)",
       fontWeight: "600",
-      border: "none",
+      border: isActive ? "none" : "1px solid rgba(6,182,212,0.2)",
       borderRadius: "6px",
       cursor: "pointer",
       background: isActive
         ? "linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)"
-        : "rgba(6,182,212,0.1)",
+        : "rgba(6,182,212,0.08)",
       color: isActive ? "white" : "#06b6d4",
       transition: "all 0.3s ease",
-      boxShadow: isActive ? "0 4px 12px rgba(6,182,212,0.3)" : "none",
-      border: isActive ? "none" : "1px solid rgba(6,182,212,0.2)",
+      boxShadow: isActive ? "0 2px 8px rgba(6,182,212,0.3)" : "none",
+      whiteSpace: "nowrap",
+    }),
+    medalTypeContainer: {
+      display: "flex",
+      gap: "8px",
+      justifyContent: "center",
+      marginBottom: "16px",
+    },
+    medalTypeButton: (isActive) => ({
+      padding: "8px 16px",
+      fontSize: "clamp(10px, 2.3vw, 12px)",
+      fontWeight: "600",
+      border: isActive ? "none" : "1px solid rgba(251, 191, 36, 0.3)",
+      borderRadius: "6px",
+      cursor: "pointer",
+      background: isActive
+        ? "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)"
+        : "rgba(251, 191, 36, 0.1)",
+      color: isActive ? "#0f172a" : "#fbbf24",
+      transition: "all 0.3s ease",
+      boxShadow: isActive ? "0 2px 8px rgba(251, 191, 36, 0.3)" : "none",
+      whiteSpace: "nowrap",
     }),
     listContainer: {
       display: "flex",
@@ -307,7 +401,7 @@ function Leaderboard({ onUserClick, goBack }) {
     rank: {
       fontSize: "clamp(20px, 4vw, 28px)",
       fontWeight: "bold",
-      minWidth: "50px",
+      minWidth: "45px",
       textAlign: "center",
       color: "#fbbf24",
     },
@@ -326,19 +420,34 @@ function Leaderboard({ onUserClick, goBack }) {
       textDecoration: "underline",
       textDecorationColor: "rgba(6,182,212,0.3)",
     },
+    levelBadge: {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
+      borderRadius: "6px",
+      padding: "4px 10px",
+      fontSize: "clamp(10px, 2vw, 12px)",
+      fontWeight: "700",
+      color: "#0f172a",
+      minWidth: "42px",
+      textAlign: "center",
+      boxShadow: "0 2px 6px rgba(251, 191, 36, 0.3)",
+      marginBottom: "6px",
+    },
     stats: {
-      fontSize: "clamp(10px, 2vw, 11px)",
+      fontSize: "clamp(9px, 2vw, 10px)",
       color: "#bfdbfe",
       margin: "0",
       display: "flex",
-      gap: "12px",
+      gap: "10px",
       flexWrap: "wrap",
     },
     score: {
       fontSize: "clamp(16px, 3vw, 20px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      minWidth: "70px",
+      minWidth: "65px",
       textAlign: "right",
       flexShrink: 0,
     },
@@ -355,9 +464,31 @@ function Leaderboard({ onUserClick, goBack }) {
       gap: "2px",
     },
     medalCount: {
-      fontSize: "clamp(9px, 2vw, 10px)",
+      fontSize: "clamp(8px, 2vw, 9px)",
       color: "#06b6d4",
       fontWeight: "600",
+    },
+    medalRow: {
+      display: "flex",
+      gap: "20px",
+      marginTop: "12px",
+      alignItems: "center",
+    },
+    medalItem: {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      fontSize: "clamp(12px, 2vw, 14px)",
+    },
+    medalEmoji: {
+      fontSize: "clamp(18px, 3vw, 24px)",
+    },
+    medalScore: {
+      fontSize: "clamp(14px, 3vw, 18px)",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      minWidth: "40px",
+      textAlign: "center",
     },
     emptyState: {
       textAlign: "center",
@@ -396,17 +527,39 @@ function Leaderboard({ onUserClick, goBack }) {
 
       {/* CONTENT */}
       <div style={styles.contentContainer}>
-        <p style={styles.subtitle}>
-          {activeTab === "allTime"
-            ? "All-Time Champions"
-            : activeTab === "thisWeek"
-            ? "This Week's Stars"
-            : activeTab === "thisMonth"
-            ? "This Month's Heroes"
-            : "Highest Scores"}
-        </p>
+        {activeTab !== "medals" && (
+          <p style={styles.subtitle}>
+            {activeTab === "allTime"
+              ? "All-Time Champions"
+              : activeTab === "today"
+              ? "Today's Top Performers"
+              : activeTab === "thisWeek"
+              ? "This Week's Stars"
+              : activeTab === "thisMonth"
+              ? "This Month's Heroes"
+              : "Highest Scores"}
+          </p>
+        )}
 
         <div style={styles.tabsContainer}>
+          <button
+            style={styles.tab(activeTab === "today")}
+            onClick={() => setActiveTab("today")}
+          >
+            📌 Today
+          </button>
+          <button
+            style={styles.tab(activeTab === "thisWeek")}
+            onClick={() => setActiveTab("thisWeek")}
+          >
+            📅 Week
+          </button>
+          <button
+            style={styles.tab(activeTab === "thisMonth")}
+            onClick={() => setActiveTab("thisMonth")}
+          >
+            📆 Month
+          </button>
           <button
             style={styles.tab(activeTab === "allTime")}
             onClick={() => setActiveTab("allTime")}
@@ -414,32 +567,109 @@ function Leaderboard({ onUserClick, goBack }) {
             ⭐ All Time
           </button>
           <button
-            style={styles.tab(activeTab === "thisWeek")}
-            onClick={() => setActiveTab("thisWeek")}
-          >
-            📅 This Week
-          </button>
-          <button
-            style={styles.tab(activeTab === "thisMonth")}
-            onClick={() => setActiveTab("thisMonth")}
-          >
-            📆 This Month
-          </button>
-          <button
             style={styles.tab(activeTab === "bestScore")}
             onClick={() => setActiveTab("bestScore")}
           >
-            ⚡ Best Score
+            ⚡ Best
+          </button>
+          <button
+            style={styles.tab(activeTab === "medals")}
+            onClick={() => setActiveTab("medals")}
+          >
+            🏅 Medals
           </button>
         </div>
 
+        {/* MEDALS SUB-TABS */}
+        {activeTab === "medals" && (
+          <>
+            <p style={styles.subtitle}>Medal Champions</p>
+            <div style={styles.medalTypeContainer}>
+              <button
+                style={styles.medalTypeButton(medalType === "weekly")}
+                onClick={() => setMedalType("weekly")}
+              >
+                📅 Weekly
+              </button>
+              <button
+                style={styles.medalTypeButton(medalType === "monthly")}
+                onClick={() => setMedalType("monthly")}
+              >
+                📆 Monthly
+              </button>
+            </div>
+          </>
+        )}
+
         {loading ? (
           <div style={styles.loadingState}>Loading leaderboard...</div>
+        ) : activeTab === "medals" ? (
+          // MEDALS VIEW
+          medalLeaderboard.length === 0 ? (
+            <div style={styles.emptyState}>
+              No medals awarded yet. Keep playing! 🎮
+            </div>
+          ) : (
+            <div style={styles.listContainer}>
+              {medalLeaderboard.map((entry, index) => (
+                <div
+                  key={entry.user_id}
+                  style={styles.card}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow =
+                      "0 4px 15px rgba(6,182,212,0.3)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "none";
+                    e.currentTarget.style.boxShadow =
+                      "0 2px 8px rgba(0,0,0,0.2)";
+                  }}
+                >
+                  <div style={styles.rank}>#{index + 1}</div>
+                  <div style={styles.userInfo}>
+                    <h3
+                      style={styles.username}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUserClick(entry.user_id, entry.username);
+                      }}
+                    >
+                      {entry.username}
+                    </h3>
+                    <div style={styles.medalRow}>
+                      {entry.gold > 0 && (
+                        <div style={styles.medalItem}>
+                          <span style={styles.medalEmoji}>🥇</span>
+                          <span style={styles.medalScore}>{entry.gold}</span>
+                        </div>
+                      )}
+                      {entry.silver > 0 && (
+                        <div style={styles.medalItem}>
+                          <span style={styles.medalEmoji}>🥈</span>
+                          <span style={styles.medalScore}>{entry.silver}</span>
+                        </div>
+                      )}
+                      {entry.bronze > 0 && (
+                        <div style={styles.medalItem}>
+                          <span style={styles.medalEmoji}>🥉</span>
+                          <span style={styles.medalScore}>{entry.bronze}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div style={styles.score}>{entry.totalScore}</div>
+                </div>
+              ))}
+            </div>
+          )
         ) : leaderboard.length === 0 ? (
+          // SCORES VIEW - EMPTY
           <div style={styles.emptyState}>
             No scores yet. Be the first to play! 🎮
           </div>
         ) : (
+          // SCORES VIEW
           <div style={styles.listContainer}>
             {leaderboard.map((entry, index) => {
               const userMedals = medals[entry.user_id] || {
@@ -483,8 +713,8 @@ function Leaderboard({ onUserClick, goBack }) {
                     >
                       {username}
                     </h3>
+                    <div style={styles.levelBadge}>{userLevel}</div>
                     <p style={styles.stats}>
-                      <span>📊 {userLevel}</span>
                       <span>📈 Level {entry.bestLevel}</span>
                     </p>
                   </div>
