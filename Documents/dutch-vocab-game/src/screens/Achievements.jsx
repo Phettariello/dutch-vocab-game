@@ -28,12 +28,12 @@ function Achievements({ goBack, userId }) {
   // ============================================================================
   const calculateUserLevel = (wordsMastered) => {
     const levels = [
-      { code: "A0", name: "Beginner", min: 0, max: 499 },
-      { code: "A1", name: "Elementary", min: 500, max: 999 },
-      { code: "B1", name: "Intermediate", min: 1000, max: 1499 },
-      { code: "B2", name: "Upper Intermediate", min: 1500, max: 1999 },
-      { code: "C1", name: "Advanced", min: 2000, max: 2499 },
-      { code: "C2", name: "Mastery", min: 2500, max: 3000 },
+      { code: "A0", name: "Beginner", min: 0, max: 500 },
+      { code: "A1", name: "Elementary", min: 501, max: 1000 },
+      { code: "B1", name: "Intermediate", min: 1001, max: 1500 },
+      { code: "B2", name: "Upper Intermediate", min: 1501, max: 2000 },
+      { code: "C1", name: "Advanced", min: 2001, max: 2500 },
+      { code: "C2", name: "Mastery", min: 2501, max: 3000 },
     ];
 
     let currentLevel = levels[0];
@@ -51,14 +51,14 @@ function Achievements({ goBack, userId }) {
       }
     }
 
-    // If mastered > 3000, set to C2
+    // If mastered >= 3000, set to C2
     if (wordsMastered >= 3000) {
       currentLevel = levels[5];
       nextLevel = levels[5];
       progress = 100;
     }
 
-    const wordsNeeded = nextLevel.max + 1;
+    const wordsNeeded = nextLevel.max;
 
     return {
       userLevel: currentLevel.code,
@@ -155,7 +155,6 @@ function Achievements({ goBack, userId }) {
           score: s.score,
           level: s.level,
           correctAnswers: s.correct_answers,
-          totalWords: s.total_words,
         }));
         setTopResults(topSessions);
       }
@@ -550,7 +549,7 @@ function Achievements({ goBack, userId }) {
                       <div style={styles.colScore}>{result.score}</div>
                       <div style={styles.colLevel}>{result.level}</div>
                       <div style={styles.colCorrect}>
-                        {result.correctAnswers}/{result.totalWords}
+                        {result.correctAnswers}
                       </div>
                     </div>
                   ))}
