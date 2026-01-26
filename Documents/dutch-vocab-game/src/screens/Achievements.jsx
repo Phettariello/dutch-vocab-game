@@ -9,6 +9,10 @@ function Achievements({ goBack, userId }) {
     bestLevel: 0,
     maxCorrectAnswers: 0,
     wordsMastered: 0,
+    userLevel: "A0",
+    levelName: "Beginner",
+    levelProgress: 0,
+    wordsNeeded: 500,
     totalWeeklyGold: 0,
     totalWeeklySilver: 0,
     totalWeeklyBronze: 0,
@@ -18,6 +22,51 @@ function Achievements({ goBack, userId }) {
   });
   const [loading, setLoading] = useState(true);
   const [topResults, setTopResults] = useState([]);
+
+  // ============================================================================
+  // FUNCTION: Calculate user level based on words mastered
+  // ============================================================================
+  const calculateUserLevel = (wordsMastered) => {
+    const levels = [
+      { code: "A0", name: "Beginner", min: 0, max: 499 },
+      { code: "A1", name: "Elementary", min: 500, max: 999 },
+      { code: "B1", name: "Intermediate", min: 1000, max: 1499 },
+      { code: "B2", name: "Upper Intermediate", min: 1500, max: 1999 },
+      { code: "C1", name: "Advanced", min: 2000, max: 2499 },
+      { code: "C2", name: "Mastery", min: 2500, max: 3000 },
+    ];
+
+    let currentLevel = levels[0];
+    let nextLevel = levels[1] || levels[0];
+    let progress = 0;
+
+    for (let i = 0; i < levels.length; i++) {
+      if (wordsMastered >= levels[i].min && wordsMastered <= levels[i].max) {
+        currentLevel = levels[i];
+        nextLevel = levels[i + 1] || levels[i];
+        const rangeSize = currentLevel.max - currentLevel.min + 1;
+        const wordsInRange = wordsMastered - currentLevel.min;
+        progress = (wordsInRange / rangeSize) * 100;
+        break;
+      }
+    }
+
+    // If mastered > 3000, set to C2
+    if (wordsMastered >= 3000) {
+      currentLevel = levels[5];
+      nextLevel = levels[5];
+      progress = 100;
+    }
+
+    const wordsNeeded = nextLevel.max + 1;
+
+    return {
+      userLevel: currentLevel.code,
+      levelName: currentLevel.name,
+      levelProgress: progress,
+      wordsNeeded: wordsNeeded,
+    };
+  };
 
   // ============================================================================
   // EFFECT: Fetch all achievements data
@@ -70,6 +119,9 @@ function Achievements({ goBack, userId }) {
       // Words mastered (where mastered = true)
       const wordsMastered = progressData?.filter((w) => w.mastered).length || 0;
 
+      // Calculate user level
+      const levelInfo = calculateUserLevel(wordsMastered);
+
       // Count medals
       let weeklyCount = { gold: 0, silver: 0, bronze: 0 };
       let monthlyCount = { gold: 0, silver: 0, bronze: 0 };
@@ -88,6 +140,7 @@ function Achievements({ goBack, userId }) {
         bestLevel,
         maxCorrectAnswers,
         wordsMastered,
+        ...levelInfo,
         totalWeeklyGold: weeklyCount.gold,
         totalWeeklySilver: weeklyCount.silver,
         totalWeeklyBronze: weeklyCount.bronze,
@@ -103,8 +156,6 @@ function Achievements({ goBack, userId }) {
           level: s.level,
           correctAnswers: s.correct_answers,
           totalWords: s.total_words,
-          category: s.category || "General",
-          createdAt: s.created_at,
         }));
         setTopResults(topSessions);
       }
@@ -113,25 +164,6 @@ function Achievements({ goBack, userId }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
   };
 
   const styles = {
@@ -186,6 +218,66 @@ function Achievements({ goBack, userId }) {
     },
     section: {
       marginBottom: "28px",
+    },
+    levelCard: {
+      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+      border: "2px solid rgba(251, 191, 36, 0.3)",
+      borderRadius: "12px",
+      padding: "16px",
+      color: "white",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+    },
+    levelHeader: {
+      display: "flex",
+      alignItems: "center",
+      gap: "16px",
+      marginBottom: "12px",
+    },
+    levelBadge: {
+      background: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
+      borderRadius: "10px",
+      padding: "12px 16px",
+      textAlign: "center",
+      minWidth: "70px",
+      boxShadow: "0 4px 12px rgba(251, 191, 36, 0.3)",
+    },
+    levelText: {
+      fontSize: "clamp(18px, 4vw, 24px)",
+      fontWeight: "bold",
+      color: "#0f172a",
+    },
+    levelInfo: {
+      flex: 1,
+    },
+    levelTitle: {
+      fontSize: "clamp(14px, 3vw, 16px)",
+      fontWeight: "700",
+      margin: "0 0 4px 0",
+      color: "#fbbf24",
+    },
+    levelProgress: {
+      fontSize: "clamp(12px, 2.5vw, 13px)",
+      color: "#bfdbfe",
+      margin: "0",
+    },
+    progressBarContainer: {
+      width: "100%",
+      height: "8px",
+      background: "rgba(0,0,0,0.2)",
+      borderRadius: "4px",
+      overflow: "hidden",
+      marginBottom: "6px",
+    },
+    progressBar: {
+      height: "100%",
+      background: "linear-gradient(90deg, #06b6d4 0%, #fbbf24 100%)",
+      transition: "width 0.3s ease",
+    },
+    progressText: {
+      fontSize: "clamp(10px, 2vw, 11px)",
+      color: "#bfdbfe",
+      margin: "0",
+      textAlign: "right",
     },
     sectionTitle: {
       fontSize: "clamp(14px, 3vw, 16px)",
@@ -273,7 +365,7 @@ function Achievements({ goBack, userId }) {
     },
     tableHeader: {
       display: "grid",
-      gridTemplateColumns: "1fr 0.8fr 1fr 1fr 1fr",
+      gridTemplateColumns: "1fr 0.8fr 1fr",
       gap: "8px",
       padding: "10px 12px",
       background: "rgba(6,182,212,0.1)",
@@ -291,7 +383,7 @@ function Achievements({ goBack, userId }) {
     },
     tableRow: {
       display: "grid",
-      gridTemplateColumns: "1fr 0.8fr 1fr 1fr 1fr",
+      gridTemplateColumns: "1fr 0.8fr 1fr",
       gap: "8px",
       padding: "10px 12px",
       background: "linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(124, 58, 237, 0.3) 100%)",
@@ -311,14 +403,6 @@ function Achievements({ goBack, userId }) {
     },
     colCorrect: {
       textAlign: "center",
-    },
-    colCategory: {
-      textAlign: "center",
-      fontSize: "clamp(9px, 2vw, 10px)",
-    },
-    colDate: {
-      textAlign: "center",
-      fontSize: "clamp(9px, 2vw, 10px)",
     },
     emptyState: {
       textAlign: "center",
@@ -392,6 +476,34 @@ function Achievements({ goBack, userId }) {
           <div style={styles.loadingState}>Loading achievements...</div>
         ) : (
           <>
+            {/* USER LEVEL */}
+            <div style={styles.section}>
+              <div style={styles.levelCard}>
+                <div style={styles.levelHeader}>
+                  <div style={styles.levelBadge}>
+                    <span style={styles.levelText}>{stats.userLevel}</span>
+                  </div>
+                  <div style={styles.levelInfo}>
+                    <p style={styles.levelTitle}>{stats.levelName}</p>
+                    <p style={styles.levelProgress}>
+                      {stats.wordsMastered} / {stats.wordsNeeded} Words
+                    </p>
+                  </div>
+                </div>
+                <div style={styles.progressBarContainer}>
+                  <div
+                    style={{
+                      ...styles.progressBar,
+                      width: `${Math.min(stats.levelProgress, 100)}%`,
+                    }}
+                  ></div>
+                </div>
+                <p style={styles.progressText}>
+                  {Math.round(Math.min(stats.levelProgress, 100))}% to next level
+                </p>
+              </div>
+            </div>
+
             {/* STATISTICS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>📊 Your Statistics</h2>
@@ -422,6 +534,29 @@ function Achievements({ goBack, userId }) {
                 </div>
               </div>
             </div>
+
+            {/* TOP RESULTS */}
+            {topResults.length > 0 && (
+              <div style={styles.section}>
+                <h2 style={styles.sectionTitle}>🏆 Top Results</h2>
+                <div style={styles.tableHeader}>
+                  <div>Score</div>
+                  <div style={{ textAlign: "center" }}>Level</div>
+                  <div style={{ textAlign: "center" }}>Correct</div>
+                </div>
+                <div style={styles.tableBody}>
+                  {topResults.map((result, index) => (
+                    <div key={index} style={styles.tableRow}>
+                      <div style={styles.colScore}>{result.score}</div>
+                      <div style={styles.colLevel}>{result.level}</div>
+                      <div style={styles.colCorrect}>
+                        {result.correctAnswers}/{result.totalWords}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* MEDALS */}
             <div style={styles.section}>
@@ -471,35 +606,6 @@ function Achievements({ goBack, userId }) {
                 </div>
               </div>
             </div>
-
-            {/* TOP RESULTS */}
-            {topResults.length > 0 && (
-              <div style={styles.section}>
-                <h2 style={styles.sectionTitle}>🏆 Top Results</h2>
-                <div style={styles.tableHeader}>
-                  <div>Score</div>
-                  <div style={{ textAlign: "center" }}>Level</div>
-                  <div style={{ textAlign: "center" }}>Correct</div>
-                  <div style={{ textAlign: "center" }}>Category</div>
-                  <div style={{ textAlign: "center" }}>Date</div>
-                </div>
-                <div style={styles.tableBody}>
-                  {topResults.map((result, index) => (
-                    <div key={index} style={styles.tableRow}>
-                      <div style={styles.colScore}>{result.score}</div>
-                      <div style={styles.colLevel}>{result.level}</div>
-                      <div style={styles.colCorrect}>
-                        {result.correctAnswers}/{result.totalWords}
-                      </div>
-                      <div style={styles.colCategory}>{result.category}</div>
-                      <div style={styles.colDate}>
-                        {formatDate(result.createdAt)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {topResults.length === 0 && !loading && (
               <div style={styles.emptyState}>
