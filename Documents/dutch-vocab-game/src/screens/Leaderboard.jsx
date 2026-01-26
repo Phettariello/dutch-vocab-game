@@ -7,35 +7,66 @@ function Leaderboard({ onUserClick, goBack }) {
   const [loading, setLoading] = useState(true);
   const [medals, setMedals] = useState({});
   const [usernames, setUsernames] = useState({});
+  const [userLevels, setUserLevels] = useState({});
 
+  // ============================================================================
+  // EFFECT: Fetch on mount and tab change ONLY
+  // ============================================================================
   useEffect(() => {
-    // Fetch immediatamente quando il tab cambia
     fetchLeaderboard();
     fetchMedals();
-
-    // Auto-refresh ogni 10 secondi (meno invasivo)
-    const interval = setInterval(() => {
-      fetchLeaderboard();
-      fetchMedals();
-    }, 10000);
-
-    // Refresh quando la pagina diventa visibile (user torna dal Play)
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        fetchLeaderboard();
-        fetchMedals();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    // Cleanup
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+    fetchUserLevels();
+    // NO auto-refresh interval - only fetch on tab change
   }, [activeTab]);
 
+  // ============================================================================
+  // FUNCTION: Calculate user level from words mastered
+  // ============================================================================
+  const calculateLevel = (wordsMastered) => {
+    const levels = [
+      { code: "A0", min: 0, max: 500 },
+      { code: "A1", min: 501, max: 1000 },
+      { code: "B1", min: 1001, max: 1500 },
+      { code: "B2", min: 1501, max: 2000 },
+      { code: "C1", min: 2001, max: 2500 },
+      { code: "C2", min: 2501, max: 3000 },
+    ];
+
+    for (let level of levels) {
+      if (wordsMastered >= level.min && wordsMastered <= level.max) {
+        return level.code;
+      }
+    }
+    return "C2";
+  };
+
+  // ============================================================================
+  // FUNCTION: Fetch user levels
+  // ============================================================================
+  const fetchUserLevels = async () => {
+    try {
+      const { data: progressData } = await supabase
+        .from("user_progress")
+        .select("user_id, mastered");
+
+      const levelMap = {};
+      progressData?.forEach((entry) => {
+        const wordsMastered = (progressData.filter(
+          (p) => p.user_id === entry.user_id && p.mastered
+        )).length;
+        if (!levelMap[entry.user_id]) {
+          levelMap[entry.user_id] = calculateLevel(wordsMastered);
+        }
+      });
+      setUserLevels(levelMap);
+    } catch (error) {
+      console.error("Error fetching user levels:", error);
+    }
+  };
+
+  // ============================================================================
+  // FUNCTION: Fetch medals
+  // ============================================================================
   const fetchMedals = async () => {
     try {
       const { data: weeklyMedals, error: weeklyError } = await supabase
@@ -61,14 +92,15 @@ function Leaderboard({ onUserClick, goBack }) {
     }
   };
 
+  // ============================================================================
+  // FUNCTION: Fetch leaderboard data
+  // ============================================================================
   const fetchLeaderboard = async () => {
     setLoading(true);
     try {
-      let query = supabase
-        .from("sessions")
-        .select("*")
-        .order("score", { ascending: false });
+      let query = supabase.from("sessions").select("*");
 
+      // Apply date filtering based on active tab
       if (activeTab === "thisWeek") {
         const weekStart = getWeekStart();
         query = query.gte("created_at", weekStart.toISOString());
@@ -77,7 +109,9 @@ function Leaderboard({ onUserClick, goBack }) {
         query = query.gte("created_at", monthStart.toISOString());
       }
 
-      const { data, error } = await query.limit(50);
+      const { data, error } = await query.order("score", {
+        ascending: false,
+      });
 
       if (error) throw error;
 
@@ -106,13 +140,21 @@ function Leaderboard({ onUserClick, goBack }) {
         );
       });
 
-      // Convert to array and sort by total score
-      const leaderboardData = Object.values(userStats)
-        .sort((a, b) => b.totalScore - a.totalScore)
-        .slice(0, 10);
+      // Convert to array and sort based on active tab
+      let leaderboardData = Object.values(userStats);
 
-      // Fetch usernames for all users from PROFILES table
-      const userIds = leaderboardData.map(entry => entry.user_id);
+      if (activeTab === "bestScore") {
+        leaderboardData.sort(
+          (a, b) => b.highestScore - a.highestScore
+        );
+      } else {
+        leaderboardData.sort((a, b) => b.totalScore - a.totalScore);
+      }
+
+      leaderboardData = leaderboardData.slice(0, 10);
+
+      // Fetch usernames
+      const userIds = leaderboardData.map((entry) => entry.user_id);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, username")
@@ -124,7 +166,6 @@ function Leaderboard({ onUserClick, goBack }) {
       });
       setUsernames(usernamesMap);
 
-      console.log("Leaderboard data:", leaderboardData);
       setLeaderboard(leaderboardData);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
@@ -133,6 +174,9 @@ function Leaderboard({ onUserClick, goBack }) {
     }
   };
 
+  // ============================================================================
+  // FUNCTION: Get week start (Monday 00:00)
+  // ============================================================================
   const getWeekStart = () => {
     const now = new Date();
     const dayOfWeek = now.getDay();
@@ -143,6 +187,9 @@ function Leaderboard({ onUserClick, goBack }) {
     return weekStart;
   };
 
+  // ============================================================================
+  // FUNCTION: Get month start
+  // ============================================================================
   const getMonthStart = () => {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -150,6 +197,9 @@ function Leaderboard({ onUserClick, goBack }) {
     return monthStart;
   };
 
+  // ============================================================================
+  // FUNCTION: Get medal emoji for rank
+  // ============================================================================
   const getMedalEmoji = (rank) => {
     if (rank === 0) return "🥇";
     if (rank === 1) return "🥈";
@@ -161,109 +211,151 @@ function Leaderboard({ onUserClick, goBack }) {
     container: {
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "40px 20px",
+      padding: "0",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      display: "flex",
+      flexDirection: "column",
     },
     header: {
-      textAlign: "center",
-      color: "white",
-      marginBottom: "40px",
+      position: "sticky",
+      top: 0,
+      zIndex: 100,
+      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "16px 20px",
+      borderBottom: "1px solid rgba(6,182,212,0.2)",
     },
     title: {
-      fontSize: "48px",
-      fontWeight: "bold",
-      margin: "0 0 10px 0",
-      textShadow: "0 2px 10px rgba(0,0,0,0.3)",
+      fontSize: "clamp(20px, 5vw, 32px)",
+      fontWeight: "800",
+      margin: 0,
+      color: "white",
+      textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+    },
+    backButton: {
+      padding: "8px 16px",
+      backgroundColor: "#06b6d4",
+      color: "#0f172a",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "clamp(12px, 2.5vw, 14px)",
+      fontWeight: "600",
+      transition: "all 0.2s ease",
+      whiteSpace: "nowrap",
+      flexShrink: 0,
+      marginLeft: "12px",
+    },
+    contentContainer: {
+      flex: 1,
+      padding: "16px",
+      maxWidth: "1000px",
+      margin: "0 auto",
+      width: "100%",
+      boxSizing: "border-box",
+      overflowY: "auto",
     },
     subtitle: {
-      fontSize: "16px",
+      fontSize: "clamp(12px, 2.5vw, 14px)",
       color: "#06b6d4",
-      margin: "0",
+      margin: "16px 0 20px 0",
+      textAlign: "center",
+      textTransform: "uppercase",
+      letterSpacing: "0.5px",
     },
     tabsContainer: {
       display: "flex",
-      gap: "10px",
+      gap: "8px",
       justifyContent: "center",
-      marginBottom: "30px",
+      marginBottom: "24px",
       flexWrap: "wrap",
     },
     tab: (isActive) => ({
-      padding: "12px 24px",
-      fontSize: "14px",
+      padding: "10px 16px",
+      fontSize: "clamp(11px, 2.5vw, 13px)",
       fontWeight: "600",
       border: "none",
-      borderRadius: "8px",
+      borderRadius: "6px",
       cursor: "pointer",
       background: isActive
         ? "linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)"
-        : "rgba(255,255,255,0.1)",
-      color: "white",
+        : "rgba(6,182,212,0.1)",
+      color: isActive ? "white" : "#06b6d4",
       transition: "all 0.3s ease",
-      boxShadow: isActive ? "0 4px 15px rgba(6,182,212,0.4)" : "none",
+      boxShadow: isActive ? "0 4px 12px rgba(6,182,212,0.3)" : "none",
+      border: isActive ? "none" : "1px solid rgba(6,182,212,0.2)",
     }),
     listContainer: {
-      maxWidth: "700px",
-      margin: "0 auto",
+      display: "flex",
+      flexDirection: "column",
+      gap: "12px",
     },
     card: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "12px",
-      padding: "20px",
-      marginBottom: "16px",
+      borderRadius: "10px",
+      padding: "14px",
       cursor: "pointer",
       transition: "all 0.3s ease",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
       display: "flex",
       alignItems: "center",
-      gap: "20px",
+      gap: "12px",
     },
     rank: {
-      fontSize: "32px",
+      fontSize: "clamp(20px, 4vw, 28px)",
       fontWeight: "bold",
-      minWidth: "60px",
+      minWidth: "50px",
       textAlign: "center",
-      color: "#06b6d4",
+      color: "#fbbf24",
     },
     userInfo: {
       flex: 1,
       color: "white",
+      minWidth: "0",
     },
     username: {
-      fontSize: "18px",
+      fontSize: "clamp(13px, 3vw, 15px)",
       fontWeight: "700",
-      margin: "0 0 8px 0",
+      margin: "0 0 6px 0",
       color: "#f0f9ff",
+      cursor: "pointer",
+      transition: "color 0.2s",
+      textDecoration: "underline",
+      textDecorationColor: "rgba(6,182,212,0.3)",
     },
     stats: {
-      fontSize: "13px",
+      fontSize: "clamp(10px, 2vw, 11px)",
       color: "#bfdbfe",
       margin: "0",
       display: "flex",
-      gap: "16px",
+      gap: "12px",
       flexWrap: "wrap",
     },
     score: {
-      fontSize: "24px",
+      fontSize: "clamp(16px, 3vw, 20px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      minWidth: "100px",
+      minWidth: "70px",
       textAlign: "right",
+      flexShrink: 0,
     },
     medalContainer: {
       display: "flex",
-      gap: "8px",
+      gap: "6px",
       alignItems: "center",
-      marginLeft: "10px",
+      flexShrink: 0,
     },
     medal: {
-      fontSize: "18px",
+      fontSize: "clamp(14px, 3vw, 16px)",
       display: "flex",
       alignItems: "center",
-      gap: "4px",
+      gap: "2px",
     },
     medalCount: {
-      fontSize: "12px",
+      fontSize: "clamp(9px, 2vw, 10px)",
       color: "#06b6d4",
       fontWeight: "600",
     },
@@ -271,152 +363,171 @@ function Leaderboard({ onUserClick, goBack }) {
       textAlign: "center",
       color: "#06b6d4",
       padding: "40px 20px",
-      fontSize: "16px",
+      fontSize: "clamp(13px, 3vw, 14px)",
     },
-    backButton: {
-      display: "inline-block",
-      marginTop: "40px",
-      padding: "12px 24px",
-      backgroundColor: "rgba(255,255,255,0.1)",
-      color: "white",
-      border: "1px solid #06b6d4",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: "600",
-      transition: "all 0.3s ease",
+    loadingState: {
       textAlign: "center",
+      color: "#06b6d4",
+      padding: "40px 20px",
+      fontSize: "clamp(14px, 3vw, 16px)",
     },
   };
 
   return (
     <div style={styles.container}>
+      {/* HEADER - STICKY */}
       <div style={styles.header}>
         <h1 style={styles.title}>🏆 LEADERBOARD</h1>
+        <button
+          style={styles.backButton}
+          onClick={goBack}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
+      </div>
+
+      {/* CONTENT */}
+      <div style={styles.contentContainer}>
         <p style={styles.subtitle}>
           {activeTab === "allTime"
             ? "All-Time Champions"
             : activeTab === "thisWeek"
             ? "This Week's Stars"
-            : "This Month's Heroes"}
+            : activeTab === "thisMonth"
+            ? "This Month's Heroes"
+            : "Highest Scores"}
         </p>
-      </div>
 
-      <div style={styles.tabsContainer}>
-        <button
-          style={styles.tab(activeTab === "allTime")}
-          onClick={() => setActiveTab("allTime")}
-        >
-          ⭐ All Time
-        </button>
-        <button
-          style={styles.tab(activeTab === "thisWeek")}
-          onClick={() => setActiveTab("thisWeek")}
-        >
-          📅 This Week
-        </button>
-        <button
-          style={styles.tab(activeTab === "thisMonth")}
-          onClick={() => setActiveTab("thisMonth")}
-        >
-          📆 This Month
-        </button>
-      </div>
+        <div style={styles.tabsContainer}>
+          <button
+            style={styles.tab(activeTab === "allTime")}
+            onClick={() => setActiveTab("allTime")}
+          >
+            ⭐ All Time
+          </button>
+          <button
+            style={styles.tab(activeTab === "thisWeek")}
+            onClick={() => setActiveTab("thisWeek")}
+          >
+            📅 This Week
+          </button>
+          <button
+            style={styles.tab(activeTab === "thisMonth")}
+            onClick={() => setActiveTab("thisMonth")}
+          >
+            📆 This Month
+          </button>
+          <button
+            style={styles.tab(activeTab === "bestScore")}
+            onClick={() => setActiveTab("bestScore")}
+          >
+            ⚡ Best Score
+          </button>
+        </div>
 
-      <div style={styles.listContainer}>
         {loading ? (
-          <div style={styles.emptyState}>Loading leaderboard...</div>
+          <div style={styles.loadingState}>Loading leaderboard...</div>
         ) : leaderboard.length === 0 ? (
           <div style={styles.emptyState}>
             No scores yet. Be the first to play! 🎮
           </div>
         ) : (
-          leaderboard.map((entry, index) => {
-            const userMedals = medals[entry.user_id] || {
-              gold: 0,
-              silver: 0,
-              bronze: 0,
-            };
-            const username = usernames[entry.user_id] || `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
+          <div style={styles.listContainer}>
+            {leaderboard.map((entry, index) => {
+              const userMedals = medals[entry.user_id] || {
+                gold: 0,
+                silver: 0,
+                bronze: 0,
+              };
+              const username =
+                usernames[entry.user_id] ||
+                `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
+              const userLevel = userLevels[entry.user_id] || "A0";
+              const displayScore =
+                activeTab === "bestScore"
+                  ? entry.highestScore
+                  : entry.totalScore;
 
-            return (
-              <div
-                key={index}
-                style={styles.card}
-                onClick={() =>
-                  onUserClick(
-                    entry.user_id,
-                    username
-                  )
-                }
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 8px 25px rgba(6,182,212,0.3)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "none";
-                  e.currentTarget.style.boxShadow =
-                    "0 4px 15px rgba(0,0,0,0.2)";
-                }}
-              >
-                <div style={styles.rank}>{getMedalEmoji(index)}</div>
+              return (
+                <div
+                  key={index}
+                  style={styles.card}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow =
+                      "0 4px 15px rgba(6,182,212,0.3)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "none";
+                    e.currentTarget.style.boxShadow =
+                      "0 2px 8px rgba(0,0,0,0.2)";
+                  }}
+                >
+                  <div style={styles.rank}>{getMedalEmoji(index)}</div>
 
-                <div style={styles.userInfo}>
-                  <h3 style={styles.username}>
-                    {username}
-                  </h3>
-                  <p style={styles.stats}>
-                    <span>📊 Score: {entry.totalScore?.toLocaleString()}</span>
-                    <span>📈 Level: {entry.bestLevel}</span>
-                    <span>🎮 Sessions: {entry.sessionsPlayed}</span>
-                  </p>
-                </div>
-
-                <div style={styles.score}>
-                  {entry.totalScore?.toLocaleString()}
-                </div>
-
-                {(userMedals.gold > 0 ||
-                  userMedals.silver > 0 ||
-                  userMedals.bronze > 0) && (
-                  <div style={styles.medalContainer}>
-                    {userMedals.gold > 0 && (
-                      <div style={styles.medal}>
-                        <span>🥇</span>
-                        <span style={styles.medalCount}>
-                          {userMedals.gold}
-                        </span>
-                      </div>
-                    )}
-                    {userMedals.silver > 0 && (
-                      <div style={styles.medal}>
-                        <span>🥈</span>
-                        <span style={styles.medalCount}>
-                          {userMedals.silver}
-                        </span>
-                      </div>
-                    )}
-                    {userMedals.bronze > 0 && (
-                      <div style={styles.medal}>
-                        <span>🥉</span>
-                        <span style={styles.medalCount}>
-                          {userMedals.bronze}
-                        </span>
-                      </div>
-                    )}
+                  <div style={styles.userInfo}>
+                    <h3
+                      style={styles.username}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUserClick(entry.user_id, username);
+                      }}
+                    >
+                      {username}
+                    </h3>
+                    <p style={styles.stats}>
+                      <span>📊 {userLevel}</span>
+                      <span>📈 Level {entry.bestLevel}</span>
+                    </p>
                   </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
 
-      <div style={{ textAlign: "center" }}>
-        <button style={styles.backButton} onClick={goBack}>
-          ← Back to Menu
-        </button>
+                  <div style={styles.score}>
+                    {displayScore?.toLocaleString()}
+                  </div>
+
+                  {(userMedals.gold > 0 ||
+                    userMedals.silver > 0 ||
+                    userMedals.bronze > 0) && (
+                    <div style={styles.medalContainer}>
+                      {userMedals.gold > 0 && (
+                        <div style={styles.medal}>
+                          <span>🥇</span>
+                          <span style={styles.medalCount}>
+                            {userMedals.gold}
+                          </span>
+                        </div>
+                      )}
+                      {userMedals.silver > 0 && (
+                        <div style={styles.medal}>
+                          <span>🥈</span>
+                          <span style={styles.medalCount}>
+                            {userMedals.silver}
+                          </span>
+                        </div>
+                      )}
+                      {userMedals.bronze > 0 && (
+                        <div style={styles.medal}>
+                          <span>🥉</span>
+                          <span style={styles.medalCount}>
+                            {userMedals.bronze}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
