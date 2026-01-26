@@ -17,7 +17,6 @@ function YourWords({ goBack }) {
   const [stats, setStats] = useState({
     total: 0,
     mastered: 0,
-    learning: 0,
     accuracy: 0,
   });
 
@@ -92,7 +91,6 @@ function YourWords({ goBack }) {
         setStats({
           total: withPercentage.length,
           mastered,
-          learning: withPercentage.length - mastered,
           accuracy,
         });
 
@@ -110,7 +108,7 @@ function YourWords({ goBack }) {
   }, []);
 
   // ============================================================================
-  // EFFECT: Apply filters (search + categories + difficulty)
+  // EFFECT: Apply filters and sorting
   // ============================================================================
   useEffect(() => {
     let filtered = words;
@@ -139,6 +137,20 @@ function YourWords({ goBack }) {
       );
     }
 
+    // Sort: 
+    // 1. Mastery % ascendente (più difficili prima)
+    // 2. Incorrect descendent (più errori prima)
+    // 3. Correct ascendente (meno corrette prima)
+    filtered.sort((a, b) => {
+      if (a.masteryPercent !== b.masteryPercent) {
+        return a.masteryPercent - b.masteryPercent;
+      }
+      if (a.incorrect_count !== b.incorrect_count) {
+        return b.incorrect_count - a.incorrect_count;
+      }
+      return a.correct_count - b.correct_count;
+    });
+
     setFilteredWords(filtered);
   }, [searchQuery, selectedCategories, selectedDifficulties, words]);
 
@@ -156,6 +168,17 @@ function YourWords({ goBack }) {
   };
 
   // ============================================================================
+  // FUNCTION: Select All/Deselect All categories
+  // ============================================================================
+  const toggleAllCategories = () => {
+    if (selectedCategories.size === categories.length) {
+      setSelectedCategories(new Set());
+    } else {
+      setSelectedCategories(new Set(categories));
+    }
+  };
+
+  // ============================================================================
   // FUNCTION: Toggle difficulty checkbox
   // ============================================================================
   const toggleDifficulty = (diff) => {
@@ -166,6 +189,17 @@ function YourWords({ goBack }) {
       newSet.add(diff);
     }
     setSelectedDifficulties(newSet);
+  };
+
+  // ============================================================================
+  // FUNCTION: Select All/Deselect All difficulties
+  // ============================================================================
+  const toggleAllDifficulties = () => {
+    if (selectedDifficulties.size === 10) {
+      setSelectedDifficulties(new Set());
+    } else {
+      setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+    }
   };
 
   // ============================================================================
@@ -209,7 +243,7 @@ function YourWords({ goBack }) {
         </button>
       </div>
 
-      {/* STATS GRID */}
+      {/* STATS GRID - 3 COLUMNS */}
       <div style={styles.statsContainer}>
         <div style={styles.statCard}>
           <p style={styles.statValue}>{stats.total}</p>
@@ -218,10 +252,6 @@ function YourWords({ goBack }) {
         <div style={styles.statCard}>
           <p style={styles.statValue}>{stats.mastered}</p>
           <p style={styles.statLabel}>✅ Mastered</p>
-        </div>
-        <div style={styles.statCard}>
-          <p style={styles.statValue}>{stats.learning}</p>
-          <p style={styles.statLabel}>🎯 Learning</p>
         </div>
         <div style={styles.statCard}>
           <p style={styles.statValue}>{stats.accuracy}%</p>
@@ -253,7 +283,17 @@ function YourWords({ goBack }) {
           <div style={styles.filtersContent}>
             {/* Categories */}
             <div style={styles.filterGroup}>
-              <h4 style={styles.filterTitle}>Categories</h4>
+              <div style={styles.filterHeader}>
+                <h4 style={styles.filterTitle}>Categories</h4>
+                <button
+                  onClick={toggleAllCategories}
+                  style={styles.selectAllBtn}
+                >
+                  {selectedCategories.size === categories.length
+                    ? "Deselect All"
+                    : "Select All"}
+                </button>
+              </div>
               <div style={styles.checkboxGroup}>
                 {categories.map((cat) => (
                   <label key={cat} style={styles.checkboxLabel}>
@@ -271,7 +311,15 @@ function YourWords({ goBack }) {
 
             {/* Difficulty */}
             <div style={styles.filterGroup}>
-              <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+              <div style={styles.filterHeader}>
+                <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+                <button
+                  onClick={toggleAllDifficulties}
+                  style={styles.selectAllBtn}
+                >
+                  {selectedDifficulties.size === 10 ? "Deselect All" : "Select All"}
+                </button>
+              </div>
               <div style={styles.difficultyGrid}>
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
                   <label key={level} style={styles.checkboxLabelSmall}>
@@ -290,7 +338,7 @@ function YourWords({ goBack }) {
         )}
       </div>
 
-      {/* WORDS GRID */}
+      {/* WORDS LIST */}
       <div style={styles.contentContainer}>
         {filteredWords.length === 0 ? (
           <div style={styles.emptyState}>
@@ -299,72 +347,46 @@ function YourWords({ goBack }) {
           </div>
         ) : (
           <>
-            <div style={styles.cardsGrid}>
-              {filteredWords.map((progress) => {
-                // Determine badge color
-                let badge = styles.successBadge; // Default mastered
-                if (!progress.mastered) {
-                  if (progress.masteryPercent >= 60) {
-                    badge = styles.warningBadge; // 60-99%
-                  } else {
-                    badge = styles.errorBadge; // 0-59%
-                  }
-                }
+            {/* Table Header */}
+            <div style={styles.tableHeader}>
+              <div style={styles.colEnglish}>English</div>
+              <div style={styles.colDutch}>Dutch</div>
+              <div style={styles.colMastery}>Mastery</div>
+              <div style={styles.colCorrect}>✅</div>
+              <div style={styles.colIncorrect}>❌</div>
+              <div style={styles.colCategory}>Category</div>
+              <div style={styles.colLevel}>Level</div>
+            </div>
 
-                return (
-                  <div
-                    key={progress.id}
-                    style={styles.card}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "translateY(-2px)";
-                      e.currentTarget.style.boxShadow =
-                        "0 6px 20px rgba(6,182,212,0.25)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = "none";
-                      e.currentTarget.style.boxShadow =
-                        "0 2px 8px rgba(0,0,0,0.1)";
-                    }}
-                  >
-                    {/* Card Header */}
-                    <div style={styles.cardHeader}>
-                      <div style={styles.cardWords}>
-                        <h3 style={styles.cardTitle}>
-                          {progress.words.english}
-                        </h3>
-                        <p style={styles.cardSubtitle}>
-                          {progress.words.dutch}
-                        </p>
-                      </div>
-                      <div style={badge}>
-                        {progress.mastered ? "✅" : `${progress.masteryPercent}%`}
-                      </div>
-                    </div>
-
-                    {/* Card Stats */}
-                    <div style={styles.cardStats}>
-                      <div style={styles.statItemSmall}>
-                        <span style={styles.statLabel}>✅</span>
-                        {progress.correct_count}
-                      </div>
-                      <div style={styles.statItemSmall}>
-                        <span style={styles.statLabel}>❌</span>
-                        {progress.incorrect_count}
-                      </div>
-                      <div style={styles.statItemSmall}>
-                        <span style={styles.statLabel}>📊</span>
-                        {progress.total}
-                      </div>
-                    </div>
-
-                    {/* Card Meta */}
-                    <div style={styles.cardMeta}>
-                      <span>📁 {progress.words.category}</span>
-                      <span>📈 Lvl {progress.words.difficulty}</span>
-                    </div>
+            {/* Table Rows */}
+            <div style={styles.tableBody}>
+              {filteredWords.map((progress) => (
+                <div key={progress.id} style={styles.tableRow}>
+                  <div style={styles.colEnglish}>{progress.words.english}</div>
+                  <div style={styles.colDutch}>{progress.words.dutch}</div>
+                  <div style={styles.colMastery}>
+                    <span
+                      style={{
+                        ...styles.masteryBadge,
+                        backgroundColor:
+                          progress.mastered
+                            ? "#22c55e"
+                            : progress.masteryPercent >= 60
+                            ? "#f97316"
+                            : "#ef4444",
+                      }}
+                    >
+                      {progress.mastered ? "✅" : `${progress.masteryPercent}%`}
+                    </span>
                   </div>
-                );
-              })}
+                  <div style={styles.colCorrect}>{progress.correct_count}</div>
+                  <div style={styles.colIncorrect}>
+                    {progress.incorrect_count}
+                  </div>
+                  <div style={styles.colCategory}>{progress.words.category}</div>
+                  <div style={styles.colLevel}>{progress.words.difficulty}</div>
+                </div>
+              ))}
             </div>
 
             {/* Results counter */}
@@ -424,7 +446,7 @@ const styles = {
   },
   statsContainer: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+    gridTemplateColumns: "repeat(3, 1fr)",
     gap: "12px",
     padding: "16px",
     maxWidth: "1000px",
@@ -436,20 +458,19 @@ const styles = {
     background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
     border: "1px solid rgba(6,182,212,0.2)",
     borderRadius: "10px",
-    padding: "14px 12px",
+    padding: "12px",
     textAlign: "center",
     color: "white",
     boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-    minHeight: "90px",
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
   },
   statValue: {
-    fontSize: "clamp(24px, 5vw, 32px)",
+    fontSize: "clamp(20px, 4vw, 28px)",
     fontWeight: "bold",
     color: "#fbbf24",
-    margin: "0 0 6px 0",
+    margin: "0 0 4px 0",
   },
   statLabel: {
     fontSize: "clamp(10px, 2vw, 12px)",
@@ -511,12 +532,30 @@ const styles = {
     flexDirection: "column",
     gap: "6px",
   },
+  filterHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+  },
   filterTitle: {
     fontSize: "clamp(11px, 2vw, 12px)",
     color: "#06b6d4",
     margin: "0",
     fontWeight: "600",
     textTransform: "uppercase",
+  },
+  selectAllBtn: {
+    padding: "4px 8px",
+    fontSize: "clamp(10px, 2vw, 11px)",
+    background: "#06b6d4",
+    color: "#0f172a",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
   },
   checkboxGroup: {
     display: "flex",
@@ -555,115 +594,81 @@ const styles = {
   contentContainer: {
     flex: 1,
     padding: "16px",
-    maxWidth: "1000px",
+    maxWidth: "1200px",
     margin: "0 auto",
     width: "100%",
     boxSizing: "border-box",
     overflowY: "auto",
   },
-  cardsGrid: {
+  tableHeader: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-    gap: "12px",
-    marginBottom: "20px",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    gap: "8px",
+    padding: "12px",
+    background: "rgba(6,182,212,0.1)",
+    borderRadius: "8px 8px 0 0",
+    borderBottom: "2px solid rgba(6,182,212,0.3)",
+    fontWeight: "600",
+    fontSize: "clamp(10px, 2vw, 12px)",
+    color: "#06b6d4",
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
   },
-  card: {
-    background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
-    border: "1px solid rgba(6,182,212,0.2)",
-    borderRadius: "10px",
-    padding: "14px",
-    color: "white",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-    transition: "all 0.2s ease",
-    cursor: "pointer",
+  tableBody: {
     display: "flex",
     flexDirection: "column",
+    gap: "1px",
+  },
+  tableRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
     gap: "8px",
+    padding: "10px 12px",
+    background: "linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(124, 58, 237, 0.3) 100%)",
+    border: "1px solid rgba(6,182,212,0.15)",
+    borderRadius: "6px",
+    alignItems: "center",
+    fontSize: "clamp(11px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+    transition: "all 0.2s ease",
   },
-  cardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "8px",
-  },
-  cardWords: {
-    flex: 1,
-    minWidth: 0,
-  },
-  cardTitle: {
-    fontSize: "clamp(13px, 3vw, 15px)",
-    fontWeight: "700",
-    margin: "0",
+  colEnglish: {
+    fontWeight: "600",
     color: "#f0f9ff",
     wordBreak: "break-word",
   },
-  cardSubtitle: {
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-    color: "#bfdbfe",
-    margin: "4px 0 0 0",
-    fontWeight: "500",
+  colDutch: {
     wordBreak: "break-word",
   },
-  successBadge: {
-    backgroundColor: "#22c55e",
-    color: "white",
-    padding: "6px 12px",
-    borderRadius: "6px",
-    fontWeight: "bold",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    minWidth: "50px",
-    textAlign: "center",
-    flexShrink: 0,
+  colMastery: {
+    display: "flex",
+    justifyContent: "center",
   },
-  warningBadge: {
-    backgroundColor: "#f97316",
-    color: "white",
-    padding: "6px 12px",
-    borderRadius: "6px",
-    fontWeight: "bold",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    minWidth: "50px",
-    textAlign: "center",
-    flexShrink: 0,
-  },
-  errorBadge: {
-    backgroundColor: "#ef4444",
-    color: "white",
-    padding: "6px 12px",
-    borderRadius: "6px",
-    fontWeight: "bold",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    minWidth: "50px",
-    textAlign: "center",
-    flexShrink: 0,
-  },
-  cardStats: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "6px",
-  },
-  statItemSmall: {
-    background: "rgba(255,255,255,0.1)",
-    padding: "6px 8px",
+  masteryBadge: {
+    padding: "4px 8px",
     borderRadius: "4px",
+    fontSize: "clamp(10px, 2vw, 11px)",
+    fontWeight: "bold",
+    color: "white",
+    minWidth: "45px",
     textAlign: "center",
-    color: "#bfdbfe",
-    fontSize: "clamp(10px, 2vw, 12px)",
-    fontWeight: "600",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "2px",
   },
-  cardMeta: {
-    display: "flex",
-    gap: "8px",
-    fontSize: "clamp(9px, 2vw, 11px)",
-    color: "#bfdbfe",
-    borderTop: "1px solid rgba(6,182,212,0.2)",
-    paddingTop: "8px",
-    marginTop: "8px",
-    flexWrap: "wrap",
+  colCorrect: {
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  colIncorrect: {
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  colCategory: {
+    textAlign: "center",
+    fontSize: "clamp(10px, 2vw, 11px)",
+  },
+  colLevel: {
+    textAlign: "center",
+    fontWeight: "600",
   },
   emptyState: {
     textAlign: "center",
