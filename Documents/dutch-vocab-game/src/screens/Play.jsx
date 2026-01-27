@@ -17,7 +17,12 @@ function Play({ goBack }) {
   const [allSessionResults, setAllSessionResults] = useState([]);
   const [usedWordIds, setUsedWordIds] = useState(new Set());
   const [questionsInLevel, setQuestionsInLevel] = useState(0);
-  const [bonusMessage, setBonusMessage] = useState("");
+  const [levelCompleted, setLevelCompleted] = useState(false);
+  const [levelStats, setLevelStats] = useState({
+    correctCount: 0,
+    streakBonusTotal: 0,
+    levelBonus: 0,
+  });
 
   const QUESTIONS_PER_LEVEL = 10;
 
@@ -48,13 +53,18 @@ function Play({ goBack }) {
         gain.gain.setValueAtTime(volume / 100, audioContext.currentTime);
         gain.gain.setValueAtTime(0, audioContext.currentTime + 0.3);
       } else if (type === "bonus") {
-        // Suono bonus (nota alta)
         osc.frequency.setValueAtTime(800, audioContext.currentTime);
         osc.frequency.setValueAtTime(900, audioContext.currentTime + 0.15);
         osc.frequency.setValueAtTime(1000, audioContext.currentTime + 0.3);
+      } else if (type === "levelup") {
+        // Suono level up celebrativo
+        osc.frequency.setValueAtTime(523.25, audioContext.currentTime);
+        osc.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1);
+        osc.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2);
+        osc.frequency.setValueAtTime(1046.5, audioContext.currentTime + 0.3);
       }
       osc.start();
-      osc.stop(audioContext.currentTime + 0.3);
+      osc.stop(audioContext.currentTime + 0.4);
     } catch (e) {}
   };
 
@@ -90,7 +100,6 @@ function Play({ goBack }) {
         data = allData;
       }
 
-      // Filter out already used words (GLOBAL - entire session)
       const availableWords = data.filter((w) => !usedWordIds.has(w.id));
       const shuffled = availableWords.sort(() => Math.random() - 0.5);
 
@@ -124,7 +133,7 @@ function Play({ goBack }) {
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>Loading...</h1>
+        <h1 style={styles.loadingText}>Loading...</h1>
       </div>
     );
   }
@@ -132,8 +141,10 @@ function Play({ goBack }) {
   if (words.length === 0) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>No words available</h1>
-        <button onClick={goBack}>Back to Menu</button>
+        <h1 style={styles.loadingText}>No words available</h1>
+        <button onClick={goBack} style={styles.primaryButton}>
+          Back to Menu
+        </button>
       </div>
     );
   }
@@ -178,7 +189,7 @@ function Play({ goBack }) {
     let newScore = score;
     let newStreak = streak;
     let newLives = lives;
-    let bonusPoints = 0;
+    let streakBonusThisRound = 0;
 
     const wordPoints = currentWord.difficulty || 1;
 
@@ -187,17 +198,18 @@ function Play({ goBack }) {
       newScore += wordPoints;
       newStreak += 1;
 
-      // Bonus per streak di 5
-      if (newStreak === 5) {
-        bonusPoints = 10;
-        newScore += bonusPoints;
-        playSound("bonus");
-        setBonusMessage(`🔥 STREAK BONUS! +${bonusPoints} points`);
-        setTimeout(() => setBonusMessage(""), 2000);
-        newStreak = 0;
-      }
+      // Streak bonus: guadagna punti = numero della streak
+      streakBonusThisRound = newStreak;
+      newScore += streakBonusThisRound;
 
-      setFeedback(`✅ Correct! (+${wordPoints}${bonusPoints > 0 ? ` +${bonusPoints} bonus` : ""})`);
+      setFeedback(
+        `✅ Correct! +${wordPoints} pts${streakBonusThisRound > 0 ? ` +${streakBonusThisRound} streak` : ""}`
+      );
+
+      // Play bonus sound per ogni 3 di streak
+      if (newStreak % 3 === 0) {
+        setTimeout(() => playSound("bonus"), 200);
+      }
     } else {
       playSound("wrong");
       newLives -= 1;
@@ -211,6 +223,7 @@ function Play({ goBack }) {
 
     const newSessionResult = {
       word: currentWord.english,
+      dutch: currentWord.dutch,
       correct: isCorrect,
       answer: userAnswer,
       level: currentLevel,
@@ -226,6 +239,15 @@ function Play({ goBack }) {
     const newQuestionsInLevel = questionsInLevel + 1;
     setQuestionsInLevel(newQuestionsInLevel);
 
+    // Aggiorna stats per il livello
+    if (isCorrect) {
+      setLevelStats((prev) => ({
+        ...prev,
+        correctCount: prev.correctCount + 1,
+        streakBonusTotal: prev.streakBonusTotal + streakBonusThisRound,
+      }));
+    }
+
     if (newLives <= 0) {
       setTimeout(() => {
         saveSessionAuto(newScore + totalSessionScore, allSessionResults);
@@ -233,11 +255,11 @@ function Play({ goBack }) {
       }, 2000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
       setTimeout(() => {
-        nextLevel(newScore);
+        nextLevel(newScore, newQuestionsInLevel);
       }, 2000);
     } else if (currentIndex >= words.length - 1) {
       setTimeout(() => {
-        nextLevel(newScore);
+        nextLevel(newScore, newQuestionsInLevel);
       }, 2000);
     } else {
       setTimeout(() => {
@@ -247,12 +269,32 @@ function Play({ goBack }) {
     }
   };
 
-  const nextLevel = async (levelScore) => {
+  const nextLevel = async (levelScore, totalQuestionsInLevel) => {
+    const nextLevelNumber = currentLevel + 1;
+    const levelBonus = nextLevelNumber * 10; // Livello bonus
+
+    setLevelStats((prev) => ({
+      ...prev,
+      levelBonus,
+    }));
+
+    if (nextLevelNumber > 100) {
+      setTotalSessionScore(totalSessionScore + levelScore + levelBonus);
+      setGameOver(true);
+      setLevelCompleted(false);
+      return;
+    }
+
+    playSound("levelup");
+    setLevelCompleted(true);
+  };
+
+  const proceedToNextLevel = async () => {
     const nextLevelNumber = currentLevel + 1;
 
     if (nextLevelNumber > 100) {
-      setTotalSessionScore(totalSessionScore + levelScore);
       setGameOver(true);
+      setLevelCompleted(false);
       return;
     }
 
@@ -267,12 +309,17 @@ function Play({ goBack }) {
       setScore(0);
       setStreak(0);
       setQuestionsInLevel(0);
-      setTotalSessionScore(totalSessionScore + levelScore);
+      setTotalSessionScore(
+        totalSessionScore + levelStats.correctCount * (currentLevel) + levelStats.streakBonusTotal + levelStats.levelBonus
+      );
       setSessionResults([]);
+      setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
+      setLevelCompleted(false);
     } catch (error) {
       console.error("Error loading next level:", error);
       alert("Failed to load next level.");
       setGameOver(true);
+      setLevelCompleted(false);
     } finally {
       setLoading(false);
     }
@@ -379,37 +426,136 @@ function Play({ goBack }) {
     return hearts;
   };
 
+  if (levelCompleted) {
+    const correctCount = sessionResults.filter((r) => r.correct).length;
+    const levelTotalScore =
+      levelStats.correctCount * currentLevel +
+      levelStats.streakBonusTotal +
+      levelStats.levelBonus;
+    const sessionTotalScore = totalSessionScore + levelTotalScore;
+
+    return (
+      <div style={styles.levelCompleteContainer}>
+        <h1 style={styles.levelCompleteTitle}>🎉 Level {currentLevel} Complete!</h1>
+
+        <div style={styles.breakdownContainer}>
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Correct Answers</span>
+            <span style={styles.breakdownValue}>
+              {correctCount}/{sessionResults.length} → +
+              {levelStats.correctCount * currentLevel} pts
+            </span>
+          </div>
+
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Streak Bonuses</span>
+            <span style={styles.breakdownValue}>+{levelStats.streakBonusTotal} pts</span>
+          </div>
+
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Level Bonus</span>
+            <span style={styles.breakdownValue}>+{levelStats.levelBonus} pts</span>
+          </div>
+
+          <div style={styles.breakdownDivider} />
+
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Level Total</span>
+            <span style={styles.breakdownValueTotal}>+{levelTotalScore} pts</span>
+          </div>
+
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Session Total</span>
+            <span style={styles.breakdownValueSession}>{sessionTotalScore} pts</span>
+          </div>
+        </div>
+
+        <button
+          onClick={proceedToNextLevel}
+          style={styles.primaryButton}
+        >
+          Next Level →
+        </button>
+      </div>
+    );
+  }
+
   if (gameOver) {
     const correctCount = allSessionResults.filter((r) => r.correct).length;
-    const finalScore = totalSessionScore + score;
+    const finalScore = totalSessionScore;
     const accuracy =
       allSessionResults.length > 0
         ? Math.round((correctCount / allSessionResults.length) * 100)
         : 0;
 
+    // Missed words da TUTTA la sessione
+    const missedWords = allSessionResults
+      .filter((r) => !r.correct)
+      .reduce((acc, result) => {
+        const existing = acc.find((item) => item.word === result.word);
+        if (!existing) {
+          acc.push({
+            word: result.word,
+            dutch: result.dutch,
+            attempts: 1,
+          });
+        } else {
+          existing.attempts += 1;
+        }
+        return acc;
+      }, [])
+      .sort((a, b) => b.attempts - a.attempts);
+
     return (
       <div style={styles.gameOverContainer}>
-        <h1 style={styles.gameOverTitle}>🎮 Game Over!</h1>
-        <div style={styles.statsContainer}>
-          <div style={styles.statBox}>
-            <p style={styles.statLabel}>Final Score</p>
+        <div style={styles.header}>
+          <h1 style={styles.gameOverTitle}>Game Over</h1>
+          <button
+            onClick={goBack}
+            style={styles.backButtonGameOver}
+          >
+            ← Menu
+          </button>
+        </div>
+
+        <div style={styles.statsGrid}>
+          <div style={styles.statCard}>
             <p style={styles.statValue}>{finalScore}</p>
+            <p style={styles.statLabel}>Final Score</p>
           </div>
-          <div style={styles.statBox}>
-            <p style={styles.statLabel}>Levels Completed</p>
+          <div style={styles.statCard}>
             <p style={styles.statValue}>{currentLevel}</p>
+            <p style={styles.statLabel}>Levels</p>
           </div>
-          <div style={styles.statBox}>
-            <p style={styles.statLabel}>Accuracy</p>
+          <div style={styles.statCard}>
             <p style={styles.statValue}>{accuracy}%</p>
+            <p style={styles.statLabel}>Accuracy</p>
           </div>
-          <div style={styles.statBox}>
-            <p style={styles.statLabel}>Correct Answers</p>
+          <div style={styles.statCard}>
             <p style={styles.statValue}>
               {correctCount}/{allSessionResults.length}
             </p>
+            <p style={styles.statLabel}>Correct</p>
           </div>
         </div>
+
+        {missedWords.length > 0 && (
+          <div style={styles.missedWordsContainer}>
+            <h2 style={styles.missedWordsTitle}>📝 Words to Review</h2>
+            <div style={styles.missedWordsList}>
+              {missedWords.slice(0, 10).map((item, idx) => (
+                <div key={idx} style={styles.missedWordItem}>
+                  <span style={styles.missedWordEnglish}>{item.word}</span>
+                  <span style={styles.missedWordDutch}>{item.dutch}</span>
+                  {item.attempts > 1 && (
+                    <span style={styles.attemptsBadge}>{item.attempts}x</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={styles.buttonContainer}>
           <button onClick={startNewGame} style={styles.primaryButton}>
             🎮 New Game
@@ -425,36 +571,36 @@ function Play({ goBack }) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <div style={styles.headerTop}>
-          <h1 style={styles.title}>Level {currentLevel}</h1>
+        <h1 style={styles.title}>Level {currentLevel}</h1>
+        <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
+          <button onClick={goBack} style={styles.backButton}>
+            ← Menu
+          </button>
         </div>
-        <div style={styles.progressBar}>
-          <div
-            style={{
-              ...styles.progressFill,
-              width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
-            }}
-          />
-        </div>
+      </div>
+
+      <div style={styles.progressBar}>
+        <div
+          style={{
+            ...styles.progressFill,
+            width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
+          }}
+        />
       </div>
 
       <div style={styles.stats}>
         <div style={styles.statItem}>
-          <span>📊</span> Score: <strong>{totalSessionScore + score}</strong>
+          <span>📊</span> {totalSessionScore + score}
         </div>
         <div style={styles.statItem}>
-          <span>🔥</span> Streak: <strong>{streak}</strong>
+          <span>🔥</span> {streak}
         </div>
       </div>
 
-      {bonusMessage && (
-        <div style={styles.bonusAlert}>{bonusMessage}</div>
-      )}
-
       <div style={styles.questionContainer}>
         <p style={styles.questionLabel}>
-          Question {questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
+          Q{questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
         </p>
         <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
@@ -478,7 +624,7 @@ function Play({ goBack }) {
           type="text"
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
-          placeholder="Enter the translation..."
+          placeholder="Type the translation..."
           style={styles.input}
           disabled={gameOver}
           autoFocus
@@ -498,10 +644,6 @@ function Play({ goBack }) {
           {feedback}
         </p>
       )}
-
-      <button onClick={goBack} style={styles.exitButton} disabled={gameOver}>
-        ← Exit
-      </button>
     </div>
   );
 }
@@ -510,43 +652,58 @@ const styles = {
   container: {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "20px 20px",
+    padding: "16px",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    display: "flex",
+    flexDirection: "column",
   },
   header: {
-    textAlign: "center",
-    marginBottom: "20px",
-  },
-  headerTop: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    maxWidth: "600px",
-    margin: "0 auto 12px",
+    marginBottom: "12px",
     gap: "12px",
   },
   title: {
-    fontSize: "clamp(20px, 5vw, 32px)",
+    fontSize: "clamp(20px, 5vw, 28px)",
     fontWeight: "700",
     color: "#1e293b",
     margin: "0",
+    flex: 1,
+  },
+  headerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
   livesContainer: {
     display: "flex",
-    gap: "4px",
-    fontSize: "clamp(18px, 4vw, 24px)",
+    gap: "2px",
+    fontSize: "clamp(16px, 4vw, 20px)",
     flexShrink: 0,
   },
   heart: {
     display: "inline-block",
   },
+  backButton: {
+    padding: "6px 12px",
+    fontSize: "clamp(11px, 2.5vw, 13px)",
+    background: "#06b6d4",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
   progressBar: {
-    height: "8px",
+    height: "6px",
     background: "#e5e7eb",
-    borderRadius: "10px",
+    borderRadius: "8px",
     overflow: "hidden",
-    maxWidth: "400px",
-    margin: "0 auto",
+    marginBottom: "12px",
   },
   progressFill: {
     height: "100%",
@@ -557,43 +714,30 @@ const styles = {
     display: "flex",
     justifyContent: "center",
     gap: "24px",
-    marginBottom: "20px",
-    flexWrap: "wrap",
-    fontSize: "clamp(13px, 3vw, 16px)",
+    marginBottom: "16px",
+    fontSize: "clamp(12px, 3vw, 14px)",
   },
   statItem: {
     color: "#475569",
-    fontWeight: "500",
-  },
-  bonusAlert: {
-    background: "linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)",
-    color: "#78350f",
-    padding: "12px 20px",
-    borderRadius: "8px",
-    textAlign: "center",
-    fontWeight: "700",
-    fontSize: "clamp(13px, 3vw, 16px)",
-    marginBottom: "16px",
-    boxShadow: "0 4px 12px rgba(251, 191, 36, 0.3)",
-    animation: "slideDown 0.3s ease",
+    fontWeight: "600",
   },
   questionContainer: {
     textAlign: "center",
-    marginBottom: "24px",
+    marginBottom: "16px",
   },
   questionLabel: {
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    color: "#64748b",
+    margin: "0 0 6px 0",
+  },
+  questionText: {
     fontSize: "clamp(12px, 2.5vw, 14px)",
     color: "#64748b",
     margin: "0 0 8px 0",
-  },
-  questionText: {
-    fontSize: "clamp(14px, 3vw, 18px)",
-    color: "#64748b",
-    margin: "0 0 12px 0",
     fontWeight: "500",
   },
   wordToTranslate: {
-    fontSize: "clamp(28px, 8vw, 44px)",
+    fontSize: "clamp(24px, 6vw, 36px)",
     color: "#1e293b",
     margin: "0",
     fontWeight: "700",
@@ -602,73 +746,59 @@ const styles = {
   exampleBox: {
     background: "white",
     border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "16px",
-    maxWidth: "600px",
-    margin: "0 auto 20px",
+    borderRadius: "8px",
+    padding: "12px",
+    marginBottom: "16px",
     boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
+    fontSize: "clamp(11px, 2.5vw, 13px)",
   },
   exampleNL: {
     color: "#475569",
-    margin: "0 0 8px 0",
+    margin: "0 0 6px 0",
   },
   exampleEN: {
     color: "#64748b",
     margin: "0",
+    fontSize: "clamp(10px, 2.5vw, 12px)",
   },
   form: {
     display: "flex",
-    gap: "8px",
-    justifyContent: "center",
-    marginBottom: "20px",
-    flexWrap: "wrap",
-    maxWidth: "600px",
-    margin: "0 auto 20px",
+    gap: "6px",
+    marginBottom: "12px",
   },
   input: {
-    padding: "10px 12px",
-    fontSize: "clamp(14px, 3vw, 16px)",
-    border: "2px solid #e5e7eb",
-    borderRadius: "8px",
-    flex: "1 1 200px",
-    minWidth: "150px",
-    transition: "all 0.3s ease",
+    padding: "8px 10px",
+    fontSize: "clamp(13px, 3vw, 14px)",
+    border: "1px solid #e5e7eb",
+    borderRadius: "6px",
+    flex: 1,
+    minWidth: "120px",
+    transition: "all 0.2s ease",
     fontFamily: "inherit",
   },
   submitButton: {
-    padding: "10px 20px",
-    fontSize: "clamp(13px, 2.5vw, 16px)",
+    padding: "8px 16px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "6px",
     cursor: "pointer",
-    transition: "all 0.3s ease",
-    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+    transition: "all 0.2s ease",
+    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
     whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   feedback: {
-    fontSize: "clamp(14px, 3vw, 18px)",
+    fontSize: "clamp(13px, 3vw, 15px)",
     fontWeight: "600",
-    margin: "16px 0",
-    minHeight: "30px",
+    margin: "12px 0",
+    minHeight: "24px",
     textAlign: "center",
   },
-  exitButton: {
-    padding: "10px 20px",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    background: "#f3f4f6",
-    color: "#64748b",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    display: "block",
-    margin: "0 auto",
-  },
-  gameOverContainer: {
+  // Level Complete Screen
+  levelCompleteContainer: {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
     display: "flex",
@@ -678,48 +808,157 @@ const styles = {
     padding: "20px",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
-  gameOverTitle: {
-    fontSize: "clamp(28px, 6vw, 48px)",
+  levelCompleteTitle: {
+    fontSize: "clamp(28px, 6vw, 40px)",
     color: "#1e293b",
-    margin: "0 0 30px 0",
+    margin: "0 0 20px 0",
+    textAlign: "center",
   },
-  statsContainer: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-    gap: "16px",
-    maxWidth: "600px",
-    marginBottom: "30px",
-    width: "100%",
-  },
-  statBox: {
+  breakdownContainer: {
     background: "white",
-    border: "1px solid #e5e7eb",
+    border: "2px solid #e5e7eb",
     borderRadius: "12px",
     padding: "16px",
-    textAlign: "center",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+    maxWidth: "400px",
+    marginBottom: "20px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
   },
-  statLabel: {
-    fontSize: "clamp(12px, 2vw, 14px)",
-    color: "#64748b",
-    margin: "0 0 8px 0",
+  breakdownRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "8px 0",
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    fontWeight: "500",
   },
-  statValue: {
-    fontSize: "clamp(24px, 5vw, 32px)",
+  breakdownLabel: {
+    color: "#475569",
+  },
+  breakdownValue: {
+    color: "#1e293b",
+    fontWeight: "600",
+  },
+  breakdownValueTotal: {
+    color: "#059669",
     fontWeight: "700",
+    fontSize: "clamp(14px, 3vw, 16px)",
+  },
+  breakdownValueSession: {
+    color: "#3b82f6",
+    fontWeight: "700",
+    fontSize: "clamp(14px, 3vw, 16px)",
+  },
+  breakdownDivider: {
+    height: "1px",
+    background: "#e5e7eb",
+    margin: "8px 0",
+  },
+  // Game Over Screen
+  gameOverContainer: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    display: "flex",
+    flexDirection: "column",
+    padding: "16px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  gameOverTitle: {
+    fontSize: "clamp(24px, 6vw, 36px)",
     color: "#1e293b",
     margin: "0",
+    textAlign: "center",
+  },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "12px",
+    maxWidth: "500px",
+    margin: "20px auto",
+    width: "100%",
+  },
+  statCard: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "10px",
+    padding: "12px",
+    textAlign: "center",
+    boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+  },
+  statValue: {
+    fontSize: "clamp(20px, 4vw, 28px)",
+    fontWeight: "700",
+    color: "#1e293b",
+    margin: "0 0 4px 0",
+  },
+  statLabel: {
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#64748b",
+    margin: "0",
+    fontWeight: "600",
+  },
+  missedWordsContainer: {
+    background: "white",
+    border: "1px solid #fca5a5",
+    borderRadius: "10px",
+    padding: "14px",
+    marginBottom: "16px",
+    maxWidth: "500px",
+    margin: "0 auto 16px",
+    width: "100%",
+  },
+  missedWordsTitle: {
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    color: "#991b1b",
+    margin: "0 0 12px 0",
+    fontWeight: "600",
+  },
+  missedWordsList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  missedWordItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    padding: "8px",
+    background: "#fef2f2",
+    borderRadius: "6px",
+    gap: "8px",
+  },
+  missedWordEnglish: {
+    fontWeight: "600",
+    color: "#1e293b",
+    minWidth: "80px",
+  },
+  missedWordDutch: {
+    color: "#64748b",
+    flex: 1,
+    textAlign: "right",
+  },
+  attemptsBadge: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    padding: "2px 6px",
+    borderRadius: "4px",
+    fontWeight: "600",
+    fontSize: "clamp(10px, 2vw, 11px)",
+    minWidth: "28px",
+    textAlign: "center",
   },
   buttonContainer: {
     display: "flex",
-    gap: "12px",
+    gap: "10px",
     flexWrap: "wrap",
     justifyContent: "center",
+    maxWidth: "500px",
+    margin: "0 auto",
     width: "100%",
   },
   primaryButton: {
-    padding: "12px 24px",
-    fontSize: "clamp(13px, 2.5vw, 16px)",
+    padding: "10px 20px",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
@@ -727,22 +966,34 @@ const styles = {
     borderRadius: "8px",
     cursor: "pointer",
     boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
-    transition: "all 0.3s ease",
+    transition: "all 0.2s ease",
     flex: "1 1 150px",
     minWidth: "120px",
   },
   secondaryButton: {
-    padding: "12px 24px",
-    fontSize: "clamp(13px, 2.5vw, 16px)",
+    padding: "10px 20px",
+    fontSize: "clamp(12px, 2.5vw, 14px)",
     fontWeight: "600",
     background: "#f3f4f6",
     color: "#475569",
     border: "1px solid #e5e7eb",
     borderRadius: "8px",
     cursor: "pointer",
-    transition: "all 0.3s ease",
+    transition: "all 0.2s ease",
     flex: "1 1 150px",
     minWidth: "120px",
+  },
+  backButtonGameOver: {
+    padding: "8px 14px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    background: "#06b6d4",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
   },
   loadingContainer: {
     minHeight: "100vh",
@@ -753,6 +1004,11 @@ const styles = {
     background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     padding: "20px",
+  },
+  loadingText: {
+    fontSize: "clamp(20px, 5vw, 28px)",
+    color: "#1e293b",
+    margin: "0",
   },
 };
 
