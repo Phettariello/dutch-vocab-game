@@ -69,9 +69,9 @@ function Play({ goBack }) {
 
   const fetchWordsForLevel = async (levelNumber) => {
     try {
-      // Difficulty based on level: 1-9 use 1-5, 10+ use any (1-10)
-      let maxDifficulty = 5;
-      if (levelNumber >= 10) {
+      // Difficulty based on level: 1-10 use 1-3, 11+ use any (1-10)
+      let maxDifficulty = 3;
+      if (levelNumber >= 11) {
         maxDifficulty = 10;
       }
 
