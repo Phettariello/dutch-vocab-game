@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
+
 function Practice({ goBack }) {
   const [categories, setCategories] = useState([]);
   const [selectedCategories, setSelectedCategories] = useState([]);
@@ -8,7 +9,9 @@ function Practice({ goBack }) {
   const [loading, setLoading] = useState(true);
   const [practiceStarted, setPracticeStarted] = useState(false);
 
+
   const difficulties = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -17,7 +20,9 @@ function Practice({ goBack }) {
           .from("words")
           .select("category");
 
+
         if (error) throw error;
+
 
         const uniqueCategories = [
           ...new Set(data.map((w) => w.category).filter((c) => c)),
@@ -32,8 +37,10 @@ function Practice({ goBack }) {
       }
     };
 
+
     fetchCategories();
   }, []);
+
 
   const toggleCategory = (category) => {
     setSelectedCategories((prev) =>
@@ -43,6 +50,16 @@ function Practice({ goBack }) {
     );
   };
 
+
+  const toggleAllCategories = () => {
+    if (selectedCategories.length === categories.length) {
+      setSelectedCategories([]);
+    } else {
+      setSelectedCategories([...categories]);
+    }
+  };
+
+
   const toggleDifficulty = (difficulty) => {
     setSelectedDifficulties((prev) =>
       prev.includes(difficulty)
@@ -50,6 +67,16 @@ function Practice({ goBack }) {
         : [...prev, difficulty]
     );
   };
+
+
+  const toggleAllDifficulties = () => {
+    if (selectedDifficulties.length === difficulties.length) {
+      setSelectedDifficulties([]);
+    } else {
+      setSelectedDifficulties([...difficulties]);
+    }
+  };
+
 
   const handleStartPractice = () => {
     if (selectedCategories.length === 0 || selectedDifficulties.length === 0) {
@@ -59,13 +86,15 @@ function Practice({ goBack }) {
     setPracticeStarted(true);
   };
 
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>Loading...</h1>
+        <h1 style={styles.loadingText}>Loading...</h1>
       </div>
     );
   }
+
 
   if (practiceStarted) {
     return (
@@ -78,32 +107,45 @@ function Practice({ goBack }) {
     );
   }
 
+
   return (
     <div style={styles.selectionContainer}>
-      <h1 style={styles.selectionTitle}>📚 Practice Mode</h1>
+      <div style={styles.selectionHeader}>
+        <h1 style={styles.selectionTitle}>📚 Practice Mode</h1>
+        <button
+          onClick={goBack}
+          style={styles.backButton}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
+      </div>
       <p style={styles.selectionSubtitle}>
-        Select categories and difficulty levels to practice. This mode doesn't
-        affect your leaderboard score.
+        Select categories and difficulty levels to practice. Your progress will be saved.
       </p>
 
+
       <div style={styles.selectionSection}>
-        <h2 style={styles.sectionTitle}>Categories</h2>
-        {categories.length > 0 && (
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}>Categories</h2>
           <div style={styles.buttonGroup}>
             <button
-              onClick={() => setSelectedCategories(categories)}
+              onClick={toggleAllCategories}
               style={styles.selectAllButton}
             >
-              Select All
-            </button>
-            <button
-              onClick={() => setSelectedCategories([])}
-              style={styles.deselectAllButton}
-            >
-              Deselect All
+              {selectedCategories.length === categories.length
+                ? "Deselect All"
+                : "Select All"}
             </button>
           </div>
-        )}
+        </div>
         {categories.length === 0 ? (
           <p style={styles.errorText}>No categories found</p>
         ) : (
@@ -114,11 +156,11 @@ function Practice({ goBack }) {
                 style={{
                   ...styles.checkboxLabel,
                   backgroundColor: selectedCategories.includes(category)
-                    ? "#e3f2fd"
-                    : "white",
+                    ? "rgba(6,182,212,0.15)"
+                    : "rgba(30, 58, 138, 0.4)",
                   borderColor: selectedCategories.includes(category)
-                    ? "#3b82f6"
-                    : "#e5e7eb",
+                    ? "#06b6d4"
+                    : "rgba(6,182,212,0.3)",
                 }}
               >
                 <input
@@ -134,35 +176,33 @@ function Practice({ goBack }) {
         )}
       </div>
 
+
       <div style={styles.selectionSection}>
-        <h2 style={styles.sectionTitle}>Difficulty Levels</h2>
-        <div style={styles.buttonGroup}>
-          <button
-            onClick={() => setSelectedDifficulties(difficulties)}
-            style={styles.selectAllButton}
-          >
-            Select All
-          </button>
-          <button
-            onClick={() => setSelectedDifficulties([])}
-            style={styles.deselectAllButton}
-          >
-            Deselect All
-          </button>
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}>Difficulty Levels (1-10)</h2>
+          <div style={styles.buttonGroup}>
+            <button
+              onClick={toggleAllDifficulties}
+              style={styles.selectAllButton}
+            >
+              {selectedDifficulties.length === difficulties.length
+                ? "Deselect All"
+                : "Select All"}
+            </button>
+          </div>
         </div>
         <div style={styles.grid5Col}>
           {difficulties.map((difficulty) => (
             <label
               key={difficulty}
               style={{
-                ...styles.checkboxLabel,
+                ...styles.checkboxLabelSmall,
                 backgroundColor: selectedDifficulties.includes(difficulty)
-                  ? "#e3f2fd"
-                  : "white",
+                  ? "rgba(6,182,212,0.15)"
+                  : "rgba(30, 58, 138, 0.4)",
                 borderColor: selectedDifficulties.includes(difficulty)
-                  ? "#3b82f6"
-                  : "#e5e7eb",
-                textAlign: "center",
+                  ? "#06b6d4"
+                  : "rgba(6,182,212,0.3)",
               }}
             >
               <input
@@ -176,6 +216,7 @@ function Practice({ goBack }) {
           ))}
         </div>
       </div>
+
 
       <div style={styles.buttonContainer}>
         <button
@@ -192,6 +233,7 @@ function Practice({ goBack }) {
   );
 }
 
+
 function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
   const [words, setWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -200,23 +242,35 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
   const [loading, setLoading] = useState(true);
   const [practiceStats, setPracticeStats] = useState({ correct: 0, total: 0 });
   const [gameOver, setGameOver] = useState(false);
+  const [userId, setUserId] = useState(null);
+
 
   useEffect(() => {
     const fetchWords = async () => {
       try {
+        const { data: userData } = await supabase.auth.getUser();
+        const currentUserId = userData.user?.id;
+        setUserId(currentUserId);
+
+
         let query = supabase.from("words").select("*");
+
 
         if (categories.length > 0) {
           query = query.in("category", categories);
         }
 
+
         if (difficulties.length > 0) {
           query = query.in("difficulty", difficulties);
         }
 
+
         const { data, error } = await query.limit(20);
 
+
         if (error) throw error;
+
 
         console.log("Loaded words:", data?.length || 0);
         const shuffled = data.sort(() => Math.random() - 0.5);
@@ -230,21 +284,86 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
       }
     };
 
+
     fetchWords();
   }, []);
+
+
+  // ============================================================================
+  // FUNCTION: Update user progress (salva in user_progress)
+  // ============================================================================
+  const updateUserProgress = async (wordId, isCorrect) => {
+    if (!userId) return;
+
+
+    try {
+      // 1. Cerca se esiste già user_progress per questa word
+      const { data: existing, error: fetchError } = await supabase
+        .from("user_progress")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("word_id", wordId)
+        .single();
+
+
+      if (fetchError && fetchError.code !== "PGRST116") {
+        console.error("Fetch error:", fetchError);
+        return;
+      }
+
+
+      if (existing) {
+        // 2. UPDATE: incrementa correct_count o incorrect_count
+        const newCorrectCount = isCorrect
+          ? existing.correct_count + 1
+          : existing.correct_count;
+        const newIncorrectCount = !isCorrect
+          ? existing.incorrect_count + 1
+          : existing.incorrect_count;
+        const isMastered = newCorrectCount >= 10;
+
+
+        await supabase
+          .from("user_progress")
+          .update({
+            correct_count: newCorrectCount,
+            incorrect_count: newIncorrectCount,
+            mastered: isMastered,
+            last_seen_at: new Date(),
+          })
+          .eq("id", existing.id);
+      } else {
+        // 3. INSERT: crea nuova riga
+        await supabase.from("user_progress").insert([
+          {
+            user_id: userId,
+            word_id: wordId,
+            correct_count: isCorrect ? 1 : 0,
+            incorrect_count: !isCorrect ? 1 : 0,
+            mastered: false,
+            last_seen_at: new Date(),
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error("Error updating progress:", error);
+    }
+  };
+
 
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>Loading...</h1>
+        <h1 style={styles.loadingText}>Loading...</h1>
       </div>
     );
   }
 
+
   if (words.length === 0) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>No words found with those filters</h1>
+        <h1 style={styles.loadingText}>No words found with those filters</h1>
         <button onClick={goBack} style={styles.secondaryButton}>
           Back to Selection
         </button>
@@ -252,7 +371,9 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
     );
   }
 
+
   const currentWord = words[currentIndex];
+
 
   const normalize = (str) => {
     return str
@@ -267,9 +388,11 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
       .replace(/\s+/g, " ");
   };
 
-  const handleSubmit = (e) => {
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
+
 
     const correctFull = currentWord.dutch.toLowerCase().trim();
     const correctBase = correctFull
@@ -277,17 +400,24 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
       .replace(/^(de |het |een |het )/, "")
       .trim();
 
+
     const normalizedAnswer = normalize(userAnswer);
     const normalizedFull = normalize(correctFull);
     const normalizedBase = normalize(correctBase);
     const normalizedWithDe = normalize(`de ${correctBase}`);
     const normalizedWithHet = normalize(`het ${correctBase}`);
 
+
     const isCorrect =
       normalizedAnswer === normalizedFull ||
       normalizedAnswer === normalizedBase ||
       normalizedAnswer === normalizedWithDe ||
       normalizedAnswer === normalizedWithHet;
+
+
+    // 🔥 SALVA PROGRESSO SU DATABASE
+    await updateUserProgress(currentWord.id, isCorrect);
+
 
     if (isCorrect) {
       setFeedback("✅ Correct!");
@@ -303,7 +433,9 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
       }));
     }
 
+
     setAnswer("");
+
 
     if (currentIndex >= words.length - 1) {
       setTimeout(() => {
@@ -317,24 +449,24 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
     }
   };
 
+
   if (gameOver) {
     const percentage = Math.round(
       (practiceStats.correct / practiceStats.total) * 100
     );
 
+
     return (
       <div style={styles.gameOverContainer}>
         <h1 style={styles.gameOverTitle}>📚 Practice Complete!</h1>
-        <div style={styles.statsContainer}>
-          <div style={styles.statBox}>
+        <div style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <p style={styles.statValue}>{practiceStats.correct}/{practiceStats.total}</p>
             <p style={styles.statLabel}>Correct</p>
-            <p style={styles.statValue}>
-              {practiceStats.correct}/{practiceStats.total}
-            </p>
           </div>
-          <div style={styles.statBox}>
-            <p style={styles.statLabel}>Accuracy</p>
+          <div style={styles.statCard}>
             <p style={styles.statValue}>{percentage}%</p>
+            <p style={styles.statLabel}>Accuracy</p>
           </div>
         </div>
         <div style={styles.buttonContainer}>
@@ -349,30 +481,47 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
     );
   }
 
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <div style={styles.headerTop}>
-          <h1 style={styles.title}>Practice Mode</h1>
-        </div>
-        <div style={styles.progressBar}>
-          <div
-            style={{
-              ...styles.progressFill,
-              width: `${((currentIndex + 1) / words.length) * 100}%`,
-            }}
-          />
-        </div>
+        <h1 style={styles.title}>📚 Practice</h1>
+        <button
+          onClick={goBack}
+          style={styles.backButton}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
       </div>
+
+
+      <div style={styles.progressBar}>
+        <div
+          style={{
+            ...styles.progressFill,
+            width: `${((currentIndex + 1) / words.length) * 100}%`,
+          }}
+        />
+      </div>
+
 
       <div style={styles.stats}>
         <div style={styles.statItem}>
-          <span>📊</span> Progress: <strong>{currentIndex + 1}/{words.length}</strong>
+          <span>📊</span> {currentIndex + 1}/{words.length}
         </div>
         <div style={styles.statItem}>
-          <span>✅</span> Correct: <strong>{practiceStats.correct}/{practiceStats.total}</strong>
+          <span>✅</span> {practiceStats.correct}/{practiceStats.total}
         </div>
       </div>
+
 
       <div style={styles.questionContainer}>
         <p style={styles.questionLabel}>
@@ -381,6 +530,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
         <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
       </div>
+
 
       {currentWord.example_nl && (
         <div style={styles.exampleBox}>
@@ -394,6 +544,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
           )}
         </div>
       )}
+
 
       <form onSubmit={handleSubmit} style={styles.form}>
         <input
@@ -410,6 +561,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
         </button>
       </form>
 
+
       {feedback && (
         <p
           style={{
@@ -420,78 +572,93 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
           {feedback}
         </p>
       )}
-
-      <button onClick={goBack} style={styles.exitButton} disabled={gameOver}>
-        ← Exit
-      </button>
     </div>
   );
 }
 
+
 const styles = {
-  container: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "40px 20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
+  // ============================================================================
+  // SELECTION PAGE STYLES
+  // ============================================================================
   selectionContainer: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "40px 20px",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    padding: "20px",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    maxWidth: "700px",
-    margin: "0 auto",
+    display: "flex",
+    flexDirection: "column",
+  },
+  selectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "20px",
+    gap: "12px",
   },
   selectionTitle: {
-    fontSize: "36px",
-    fontWeight: "700",
-    color: "#1e293b",
-    margin: "0 0 10px 0",
-    textAlign: "center",
+    fontSize: "clamp(24px, 5vw, 32px)",
+    fontWeight: "800",
+    color: "white",
+    margin: "0",
+    textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+    flex: 1,
+  },
+  backButton: {
+    padding: "8px 12px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    background: "#06b6d4",
+    color: "#0f172a",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   selectionSubtitle: {
-    fontSize: "14px",
-    color: "#64748b",
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    color: "#bfdbfe",
     textAlign: "center",
     marginBottom: "30px",
   },
   selectionSection: {
-    marginBottom: "40px",
+    marginBottom: "30px",
+    maxWidth: "600px",
+    margin: "0 auto 30px",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  sectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "16px",
   },
   sectionTitle: {
-    fontSize: "20px",
+    fontSize: "clamp(16px, 3vw, 18px)",
     fontWeight: "600",
-    color: "#1e293b",
-    marginBottom: "16px",
+    color: "white",
+    margin: "0",
   },
   buttonGroup: {
     display: "flex",
-    gap: "10px",
-    marginBottom: "16px",
+    gap: "8px",
     flexWrap: "wrap",
   },
   selectAllButton: {
-    padding: "8px 16px",
-    backgroundColor: "#3b82f6",
-    color: "white",
+    padding: "6px 12px",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    background: "#06b6d4",
+    color: "#0f172a",
     border: "none",
-    borderRadius: "6px",
+    borderRadius: "4px",
     cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: "500",
+    fontWeight: "600",
     transition: "all 0.2s ease",
-  },
-  deselectAllButton: {
-    padding: "8px 16px",
-    backgroundColor: "#ef4444",
-    color: "white",
-    border: "none",
-    borderRadius: "6px",
-    cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: "500",
-    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
   },
   grid2Col: {
     display: "grid",
@@ -501,53 +668,120 @@ const styles = {
   grid5Col: {
     display: "grid",
     gridTemplateColumns: "repeat(5, 1fr)",
-    gap: "12px",
+    gap: "8px",
   },
   checkboxLabel: {
     padding: "12px",
-    border: "2px solid #e5e7eb",
-    borderRadius: "8px",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
     cursor: "pointer",
     transition: "all 0.2s ease",
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    fontSize: "14px",
-    color: "#1e293b",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+  },
+  checkboxLabelSmall: {
+    padding: "10px",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#bfdbfe",
+    flexDirection: "column",
   },
   checkbox: {
     cursor: "pointer",
-    width: "18px",
-    height: "18px",
+    width: "14px",
+    height: "14px",
+    accentColor: "#06b6d4",
   },
   errorText: {
-    color: "#ef4444",
-    fontSize: "14px",
+    color: "#fca5a5",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+  },
+  buttonContainer: {
+    display: "flex",
+    gap: "12px",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    maxWidth: "600px",
+    margin: "0 auto",
+    width: "100%",
+  },
+  primaryButton: {
+    padding: "12px 24px",
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
+    transition: "all 0.2s ease",
+    flex: "1 1 140px",
+    minWidth: "120px",
+  },
+  secondaryButton: {
+    padding: "12px 24px",
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    fontWeight: "600",
+    background: "rgba(255,255,255,0.1)",
+    color: "#06b6d4",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    flex: "1 1 140px",
+    minWidth: "120px",
+  },
+
+
+  // ============================================================================
+  // GAME PAGE STYLES
+  // ============================================================================
+  container: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    padding: "0",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    display: "flex",
+    flexDirection: "column",
   },
   header: {
-    textAlign: "center",
-    marginBottom: "40px",
-  },
-  headerTop: {
+    position: "sticky",
+    top: 0,
+    zIndex: 100,
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    maxWidth: "600px",
-    margin: "0 auto 20px",
+    padding: "16px 20px",
+    borderBottom: "1px solid rgba(6,182,212,0.2)",
+    gap: "12px",
   },
   title: {
-    fontSize: "32px",
-    fontWeight: "700",
-    color: "#1e293b",
+    fontSize: "clamp(20px, 5vw, 28px)",
+    fontWeight: "800",
     margin: "0",
+    color: "white",
+    textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+    flex: 1,
   },
   progressBar: {
-    height: "8px",
-    background: "#e5e7eb",
-    borderRadius: "10px",
+    height: "6px",
+    background: "rgba(6,182,212,0.2)",
+    borderRadius: "8px",
     overflow: "hidden",
-    maxWidth: "400px",
-    margin: "0 auto",
+    margin: "12px 20px 0",
+    maxWidth: "calc(100% - 40px)",
   },
   progressFill: {
     height: "100%",
@@ -557,172 +791,139 @@ const styles = {
   stats: {
     display: "flex",
     justifyContent: "center",
-    gap: "40px",
-    marginBottom: "40px",
-    flexWrap: "wrap",
+    gap: "32px",
+    padding: "16px 20px",
+    fontSize: "clamp(12px, 3vw, 14px)",
   },
   statItem: {
-    fontSize: "16px",
-    color: "#475569",
-    fontWeight: "500",
+    color: "#bfdbfe",
+    fontWeight: "600",
   },
   questionContainer: {
     textAlign: "center",
-    marginBottom: "40px",
+    padding: "0 20px",
+    marginBottom: "16px",
   },
   questionLabel: {
-    fontSize: "14px",
-    color: "#64748b",
-    margin: "0 0 10px 0",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    color: "#93c5fd",
+    margin: "0 0 6px 0",
   },
   questionText: {
-    fontSize: "18px",
-    color: "#64748b",
-    margin: "0 0 15px 0",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+    margin: "0 0 8px 0",
     fontWeight: "500",
   },
   wordToTranslate: {
-    fontSize: "44px",
-    color: "#1e293b",
+    fontSize: "clamp(28px, 7vw, 40px)",
+    color: "white",
     margin: "0",
     fontWeight: "700",
+    wordBreak: "break-word",
   },
   exampleBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "20px",
-    maxWidth: "600px",
-    margin: "0 auto 30px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    padding: "12px",
+    margin: "0 20px 16px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
   },
   exampleNL: {
-    fontSize: "14px",
-    color: "#475569",
-    margin: "0 0 10px 0",
+    color: "#93c5fd",
+    margin: "0 0 6px 0",
   },
   exampleEN: {
-    fontSize: "14px",
-    color: "#64748b",
+    color: "#cbd5e1",
     margin: "0",
+    fontSize: "clamp(10px, 2.5vw, 11px)",
   },
   form: {
     display: "flex",
-    gap: "10px",
-    justifyContent: "center",
-    marginBottom: "30px",
-    flexWrap: "wrap",
+    gap: "8px",
+    padding: "0 20px 12px",
   },
   input: {
-    padding: "12px 16px",
-    fontSize: "16px",
-    border: "2px solid #e5e7eb",
-    borderRadius: "8px",
-    width: "300px",
-    transition: "all 0.3s ease",
+    padding: "10px 12px",
+    fontSize: "clamp(13px, 3vw, 14px)",
+    border: "1px solid rgba(6,182,212,0.4)",
+    borderRadius: "6px",
+    flex: 1,
+    minWidth: "120px",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
+    transition: "all 0.2s ease",
     fontFamily: "inherit",
   },
   submitButton: {
-    padding: "12px 32px",
-    fontSize: "16px",
+    padding: "10px 16px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "6px",
     cursor: "pointer",
-    transition: "all 0.3s ease",
-    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+    transition: "all 0.2s ease",
+    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   feedback: {
-    fontSize: "18px",
+    fontSize: "clamp(13px, 3vw, 14px)",
     fontWeight: "600",
-    margin: "20px 0",
-    minHeight: "30px",
+    margin: "12px 20px 0",
+    minHeight: "24px",
     textAlign: "center",
-  },
-  exitButton: {
-    padding: "12px 24px",
-    fontSize: "14px",
-    background: "#f3f4f6",
-    color: "#64748b",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
-    display: "block",
-    margin: "0 auto",
   },
   gameOverContainer: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    padding: "40px 20px",
+    padding: "20px",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
   gameOverTitle: {
-    fontSize: "48px",
-    color: "#1e293b",
-    margin: "0 0 40px 0",
-  },
-  statsContainer: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "20px",
-    maxWidth: "600px",
-    marginBottom: "40px",
-  },
-  statBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "24px",
+    fontSize: "clamp(28px, 6vw, 40px)",
+    color: "white",
+    margin: "0 0 30px 0",
     textAlign: "center",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
   },
-  statLabel: {
-    fontSize: "14px",
-    color: "#64748b",
-    margin: "0 0 10px 0",
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "12px",
+    maxWidth: "400px",
+    margin: "0 auto 30px",
+    width: "100%",
+  },
+  statCard: {
+    background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+    border: "1px solid rgba(6,182,212,0.2)",
+    borderRadius: "10px",
+    padding: "14px",
+    textAlign: "center",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
   },
   statValue: {
-    fontSize: "32px",
+    fontSize: "clamp(20px, 4vw, 28px)",
     fontWeight: "700",
-    color: "#1e293b",
+    color: "#fbbf24",
+    margin: "0 0 4px 0",
+  },
+  statLabel: {
+    fontSize: "clamp(10px, 2vw, 11px)",
+    color: "#bfdbfe",
     margin: "0",
-  },
-  buttonContainer: {
-    display: "flex",
-    gap: "20px",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    marginTop: "40px",
-  },
-  primaryButton: {
-    padding: "14px 40px",
-    fontSize: "16px",
+    textTransform: "uppercase",
     fontWeight: "600",
-    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-    color: "white",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
-    transition: "all 0.3s ease",
-  },
-  secondaryButton: {
-    padding: "14px 40px",
-    fontSize: "16px",
-    fontWeight: "600",
-    background: "#f3f4f6",
-    color: "#475569",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.3s ease",
   },
   loadingContainer: {
     minHeight: "100vh",
@@ -730,9 +931,17 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    padding: "20px",
+  },
+  loadingText: {
+    fontSize: "clamp(20px, 5vw, 28px)",
+    color: "white",
+    margin: "0",
+    fontWeight: "700",
   },
 };
+
 
 export default Practice;
