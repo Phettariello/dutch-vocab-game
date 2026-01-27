@@ -16,7 +16,6 @@ function Play({ goBack }) {
   const [totalSessionScore, setTotalSessionScore] = useState(0);
   const [allSessionResults, setAllSessionResults] = useState([]);
   const [usedWordIds, setUsedWordIds] = useState(new Set());
-  const [sessionUsedWordIds, setSessionUsedWordIds] = useState(new Set()); // 🔥 NUOVO: Traccia TUTTA la sessione
   const [questionsInLevel, setQuestionsInLevel] = useState(0);
   const [levelCompleted, setLevelCompleted] = useState(false);
   const [levelStats, setLevelStats] = useState({
@@ -99,11 +98,9 @@ function Play({ goBack }) {
         data = allData;
       }
 
-      // 🔥 CRITICO: Escludi TUTTE le parole usate in questa sessione
-      const availableWords = data.filter((w) => !sessionUsedWordIds.has(w.id));
+      const availableWords = data.filter((w) => !usedWordIds.has(w.id));
       const shuffled = availableWords.sort(() => Math.random() - 0.5);
 
-      // Se non ci sono parole disponibili, usa tutte (fallback)
       return shuffled.length > 0 ? shuffled : data.sort(() => Math.random() - 0.5);
     } catch (error) {
       console.error("Error fetching words:", error);
@@ -216,12 +213,6 @@ function Play({ goBack }) {
       setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
     }
 
-    // 🔥 AGGIUNGI ALLA SESSION (non solo al livello)
-    const newSessionUsedWords = new Set(sessionUsedWordIds);
-    newSessionUsedWords.add(currentWord.id);
-    setSessionUsedWordIds(newSessionUsedWords);
-
-    // Mantieni anche il vecchio usedWordIds per compatibilità
     const newUsedWords = new Set(usedWordIds);
     newUsedWords.add(currentWord.id);
     setUsedWordIds(newUsedWords);
@@ -269,7 +260,7 @@ function Play({ goBack }) {
       setTimeout(() => {
         setCurrentIndex(currentIndex + 1);
         setFeedback("");
-      }, 2000);
+      }, 1500);
     }
   };
 
@@ -313,7 +304,6 @@ function Play({ goBack }) {
       setScore(0);
       setStreak(0);
       setQuestionsInLevel(0);
-      // 🔥 NON resettare sessionUsedWordIds - mantieni la memoria della sessione
       setTotalSessionScore(
         totalSessionScore + levelStats.correctCount * currentLevel + levelStats.streakBonusTotal + levelStats.levelBonus
       );
@@ -416,9 +406,6 @@ function Play({ goBack }) {
   };
 
   const startNewGame = () => {
-    // 🔥 RESET completo per nuova sessione
-    setSessionUsedWordIds(new Set());
-    setUsedWordIds(new Set());
     window.location.reload();
   };
 
