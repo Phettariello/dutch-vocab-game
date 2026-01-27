@@ -23,16 +23,17 @@ function Play({ goBack }) {
     streakBonusTotal: 0,
     levelBonus: 0,
   });
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const QUESTIONS_PER_LEVEL = 10;
 
   const playSound = (type) => {
-    const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
-    const volume = parseFloat(localStorage.getItem("volume")) || 70;
-
-    if (!soundEnabled) return;
-
     try {
+      const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
+      const volume = parseFloat(localStorage.getItem("volume")) || 70;
+
+      if (!soundEnabled) return;
+
       const audioContext = new (window.AudioContext ||
         window.webkitAudioContext)();
       const osc = audioContext.createOscillator();
@@ -63,7 +64,9 @@ function Play({ goBack }) {
       }
       osc.start();
       osc.stop(audioContext.currentTime + 0.4);
-    } catch (e) {}
+    } catch (error) {
+      console.warn("Audio error:", error);
+    }
   };
 
   const fetchWordsForLevel = async (levelNumber) => {
@@ -95,7 +98,7 @@ function Play({ goBack }) {
           .limit(10);
 
         if (allError) throw allError;
-        data = allData;
+        data = allData || [];
       }
 
       const availableWords = data.filter((w) => !usedWordIds.has(w.id));
@@ -104,7 +107,7 @@ function Play({ goBack }) {
       return shuffled.length > 0 ? shuffled : data.sort(() => Math.random() - 0.5);
     } catch (error) {
       console.error("Error fetching words:", error);
-      throw error;
+      return [];
     }
   };
 
@@ -113,9 +116,15 @@ function Play({ goBack }) {
       setLoading(true);
       try {
         const firstLevelWords = await fetchWordsForLevel(1);
-        setWords(firstLevelWords);
-        setCurrentLevel(1);
-        setQuestionsInLevel(0);
+        if (firstLevelWords && firstLevelWords.length > 0) {
+          setWords(firstLevelWords);
+          setCurrentLevel(1);
+          setQuestionsInLevel(0);
+        } else {
+          console.error("No words loaded");
+          alert("Failed to load words.");
+          goBack();
+        }
       } catch (error) {
         console.error("Error initializing game:", error);
         alert("Failed to load words.");
@@ -136,7 +145,7 @@ function Play({ goBack }) {
     );
   }
 
-  if (words.length === 0) {
+  if (!words || words.length === 0) {
     return (
       <div style={styles.loadingContainer}>
         <h1 style={styles.loadingText}>No words available</h1>
@@ -149,114 +158,138 @@ function Play({ goBack }) {
 
   const currentWord = words[currentIndex];
 
+  if (!currentWord) {
+    return (
+      <div style={styles.loadingContainer}>
+        <h1 style={styles.loadingText}>Error loading word</h1>
+        <button onClick={goBack} style={styles.primaryButton}>
+          Back to Menu
+        </button>
+      </div>
+    );
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    const userAnswer = answer.toLowerCase().trim();
+    
+    if (isProcessing) return;
+    setIsProcessing(true);
 
-    const normalize = (str) => {
-      return str
-        .toLowerCase()
-        .trim()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\w\s]/g, "")
-        .replace(/ï/g, "i")
-        .replace(/ü/g, "u")
-        .replace(/ö/g, "o")
-        .replace(/\s+/g, " ");
-    };
+    try {
+      const userAnswer = answer.toLowerCase().trim();
 
-    const correctFull = currentWord.dutch.toLowerCase().trim();
-    const correctBase = correctFull
-      .split(",")[0]
-      .replace(/^(de |het |een |het )/, "")
-      .trim();
+      const normalize = (str) => {
+        return str
+          .toLowerCase()
+          .trim()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^\w\s]/g, "")
+          .replace(/ï/g, "i")
+          .replace(/ü/g, "u")
+          .replace(/ö/g, "o")
+          .replace(/\s+/g, " ");
+      };
 
-    const normalizedAnswer = normalize(userAnswer);
-    const normalizedFull = normalize(correctFull);
-    const normalizedBase = normalize(correctBase);
-    const normalizedWithDe = normalize(`de ${correctBase}`);
-    const normalizedWithHet = normalize(`het ${correctBase}`);
+      const correctFull = currentWord.dutch.toLowerCase().trim();
+      const correctBase = correctFull
+        .split(",")[0]
+        .replace(/^(de |het |een |het )/, "")
+        .trim();
 
-    const isCorrect =
-      normalizedAnswer === normalizedFull ||
-      normalizedAnswer === normalizedBase ||
-      normalizedAnswer === normalizedWithDe ||
-      normalizedAnswer === normalizedWithHet;
+      const normalizedAnswer = normalize(userAnswer);
+      const normalizedFull = normalize(correctFull);
+      const normalizedBase = normalize(correctBase);
+      const normalizedWithDe = normalize(`de ${correctBase}`);
+      const normalizedWithHet = normalize(`het ${correctBase}`);
 
-    let newScore = score;
-    let newStreak = streak;
-    let newLives = lives;
-    let streakBonusThisRound = 0;
+      const isCorrect =
+        normalizedAnswer === normalizedFull ||
+        normalizedAnswer === normalizedBase ||
+        normalizedAnswer === normalizedWithDe ||
+        normalizedAnswer === normalizedWithHet;
 
-    const wordPoints = currentWord.difficulty || 1;
+      let newScore = score;
+      let newStreak = streak;
+      let newLives = lives;
+      let streakBonusThisRound = 0;
 
-    if (isCorrect) {
-      playSound("correct");
-      newScore += wordPoints;
-      newStreak += 1;
+      const wordPoints = currentWord.difficulty || 1;
 
-      streakBonusThisRound = newStreak;
-      newScore += streakBonusThisRound;
+      if (isCorrect) {
+        playSound("correct");
+        newScore += wordPoints;
+        newStreak += 1;
 
-      setFeedback(
-        `✅ Correct!\n+${wordPoints} pts\n+${streakBonusThisRound} streak`
-      );
+        streakBonusThisRound = newStreak;
+        newScore += streakBonusThisRound;
 
-      if (newStreak % 3 === 0) {
-        setTimeout(() => playSound("bonus"), 200);
+        setFeedback(
+          `✅ Correct!\n+${wordPoints} pts\n+${streakBonusThisRound} streak`
+        );
+
+        if (newStreak % 3 === 0) {
+          setTimeout(() => playSound("bonus"), 200);
+        }
+      } else {
+        playSound("wrong");
+        newLives -= 1;
+        newStreak = 0;
+        setFeedback(`❌ Wrong!\nThe answer is '${currentWord.dutch}'.`);
       }
-    } else {
-      playSound("wrong");
-      newLives -= 1;
-      newStreak = 0;
-      setFeedback(`❌ Wrong!\nThe answer is '${currentWord.dutch}'.`);
-    }
 
-    const newUsedWords = new Set(usedWordIds);
-    newUsedWords.add(currentWord.id);
-    setUsedWordIds(newUsedWords);
+      const newUsedWords = new Set(usedWordIds);
+      newUsedWords.add(currentWord.id);
+      setUsedWordIds(newUsedWords);
 
-    const newSessionResult = {
-      word: currentWord.english,
-      dutch: currentWord.dutch,
-      correct: isCorrect,
-      answer: userAnswer,
-      level: currentLevel,
-    };
+      const newSessionResult = {
+        word: currentWord.english,
+        dutch: currentWord.dutch,
+        correct: isCorrect,
+        answer: userAnswer,
+        level: currentLevel,
+      };
 
-    setSessionResults([...sessionResults, newSessionResult]);
-    setAllSessionResults([...allSessionResults, newSessionResult]);
-    setScore(newScore);
-    setLives(newLives);
-    setStreak(newStreak);
-    setAnswer("");
+      setSessionResults((prev) => [...prev, newSessionResult]);
+      setAllSessionResults((prev) => [...prev, newSessionResult]);
+      setScore(newScore);
+      setLives(newLives);
+      setStreak(newStreak);
+      setAnswer("");
 
-    const newQuestionsInLevel = questionsInLevel + 1;
-    setQuestionsInLevel(newQuestionsInLevel);
+      const newQuestionsInLevel = questionsInLevel + 1;
+      setQuestionsInLevel(newQuestionsInLevel);
 
-    if (isCorrect) {
-      setLevelStats((prev) => ({
-        ...prev,
-        correctCount: prev.correctCount + 1,
-        streakBonusTotal: prev.streakBonusTotal + streakBonusThisRound,
-      }));
-    }
+      if (isCorrect) {
+        setLevelStats((prev) => ({
+          ...prev,
+          correctCount: prev.correctCount + 1,
+          streakBonusTotal: prev.streakBonusTotal + streakBonusThisRound,
+        }));
+      }
 
-    if (newLives <= 0) {
-      setTimeout(() => {
-        saveSessionAuto(newScore + totalSessionScore, allSessionResults);
-        setGameOver(true);
-      }, 2000);
-    } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
-      setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel);
-      }, 2000);
-    } else {
-      setTimeout(() => {
-        setCurrentIndex(currentIndex + 1);
-        setFeedback("");
-      }, 1500);
+      if (newLives <= 0) {
+        setTimeout(() => {
+          saveSessionAuto(newScore + totalSessionScore, allSessionResults);
+          setGameOver(true);
+          setIsProcessing(false);
+        }, 2000);
+      } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
+        setTimeout(() => {
+          nextLevel(newScore, newQuestionsInLevel);
+          setIsProcessing(false);
+        }, 2000);
+      } else {
+        setTimeout(() => {
+          setCurrentIndex((prevIdx) => Math.min(prevIdx + 1, words.length - 1));
+          setFeedback("");
+          setIsProcessing(false);
+        }, 1500);
+      }
+    } catch (error) {
+      console.error("Error in handleSubmit:", error);
+      setIsProcessing(false);
+      alert("An error occurred. Please try again.");
     }
   };
 
@@ -292,20 +325,25 @@ function Play({ goBack }) {
     try {
       setLoading(true);
       const nextLevelWords = await fetchWordsForLevel(nextLevelNumber);
-      setWords(nextLevelWords);
-      setCurrentLevel(nextLevelNumber);
-      setCurrentIndex(0);
-      setAnswer("");
-      setFeedback("");
-      setScore(0);
-      setStreak(0);
-      setQuestionsInLevel(0);
-      setTotalSessionScore(
-        totalSessionScore + levelStats.correctCount * currentLevel + levelStats.streakBonusTotal + levelStats.levelBonus
-      );
-      setSessionResults([]);
-      setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
-      setLevelCompleted(false);
+      
+      if (nextLevelWords && nextLevelWords.length > 0) {
+        setWords(nextLevelWords);
+        setCurrentLevel(nextLevelNumber);
+        setCurrentIndex(0);
+        setAnswer("");
+        setFeedback("");
+        setScore(0);
+        setStreak(0);
+        setQuestionsInLevel(0);
+        setTotalSessionScore(
+          totalSessionScore + levelStats.correctCount * currentLevel + levelStats.streakBonusTotal + levelStats.levelBonus
+        );
+        setSessionResults([]);
+        setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
+        setLevelCompleted(false);
+      } else {
+        throw new Error("No words loaded for next level");
+      }
     } catch (error) {
       console.error("Error loading next level:", error);
       alert("Failed to load next level.");
@@ -318,7 +356,18 @@ function Play({ goBack }) {
 
   const saveSessionAuto = async (finalScore, results) => {
     try {
-      const { data: userData } = await supabase.auth.getUser();
+      if (!results || results.length === 0) {
+        console.warn("No results to save");
+        return;
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !userData?.user?.id) {
+        console.error("User error:", userError);
+        return;
+      }
+
       const userId = userData.user.id;
       const correctCount = results.filter((r) => r.correct).length;
 
@@ -347,64 +396,72 @@ function Play({ goBack }) {
       }
 
       for (const [wordEnglish, correctArray] of uniqueWords) {
-        const word = words.find((w) => w.english === wordEnglish);
-        if (!word) continue;
+        try {
+          const word = words.find((w) => w.english === wordEnglish);
+          if (!word) continue;
 
-        const correctCount = correctArray.filter((c) => c).length;
-        const incorrectCount = correctArray.filter((c) => !c).length;
+          const correctCountForWord = correctArray.filter((c) => c).length;
+          const incorrectCountForWord = correctArray.filter((c) => !c).length;
 
-        const { data: existingProgress, error: fetchError } = await supabase
-          .from("user_progress")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("word_id", word.id)
-          .single();
-
-        if (fetchError && fetchError.code !== "PGRST116") {
-          console.error("Fetch error:", fetchError);
-          continue;
-        }
-
-        if (existingProgress) {
-          const newCorrectCount =
-            existingProgress.correct_count + correctCount;
-          const newIncorrectCount =
-            existingProgress.incorrect_count + incorrectCount;
-          const isMastered = newCorrectCount >= 10;
-
-          await supabase
+          const { data: existingProgress, error: fetchError } = await supabase
             .from("user_progress")
-            .update({
-              correct_count: newCorrectCount,
-              incorrect_count: newIncorrectCount,
-              mastered: isMastered,
-              last_seen_at: new Date(),
-            })
-            .eq("id", existingProgress.id);
-        } else {
-          await supabase.from("user_progress").insert([
-            {
-              user_id: userId,
-              word_id: word.id,
-              correct_count: correctCount,
-              incorrect_count: incorrectCount,
-              mastered: false,
-              last_seen_at: new Date(),
-            },
-          ]);
+            .select("*")
+            .eq("user_id", userId)
+            .eq("word_id", word.id)
+            .single();
+
+          if (fetchError && fetchError.code !== "PGRST116") {
+            console.error("Fetch error:", fetchError);
+            continue;
+          }
+
+          if (existingProgress) {
+            const newCorrectCount = existingProgress.correct_count + correctCountForWord;
+            const newIncorrectCount = existingProgress.incorrect_count + incorrectCountForWord;
+            const isMastered = newCorrectCount >= 10;
+
+            await supabase
+              .from("user_progress")
+              .update({
+                correct_count: newCorrectCount,
+                incorrect_count: newIncorrectCount,
+                mastered: isMastered,
+                last_seen_at: new Date(),
+              })
+              .eq("id", existingProgress.id);
+          } else {
+            await supabase.from("user_progress").insert([
+              {
+                user_id: userId,
+                word_id: word.id,
+                correct_count: correctCountForWord,
+                incorrect_count: incorrectCountForWord,
+                mastered: false,
+                last_seen_at: new Date(),
+              },
+            ]);
+          }
+        } catch (error) {
+          console.error("Error saving word progress:", error);
+          continue;
         }
       }
 
-      console.log("Session saved automatically!");
+      console.log("Session saved successfully!");
     } catch (error) {
       console.error("Error saving session:", error);
     }
   };
 
   const handleQuitGame = async () => {
-    const finalScore = totalSessionScore + score;
-    await saveSessionAuto(finalScore, allSessionResults);
-    setGameOver(true);
+    try {
+      const finalScore = totalSessionScore + score;
+      await saveSessionAuto(finalScore, allSessionResults);
+      setGameOver(true);
+    } catch (error) {
+      console.error("Error in handleQuitGame:", error);
+      setGameOver(true);
+    }
   };
 
   const startNewGame = () => {
@@ -657,10 +714,10 @@ function Play({ goBack }) {
           onChange={(e) => setAnswer(e.target.value)}
           placeholder="Type the translation..."
           style={styles.input}
-          disabled={gameOver}
+          disabled={gameOver || isProcessing}
           autoFocus
         />
-        <button type="submit" style={styles.submitButton} disabled={gameOver}>
+        <button type="submit" style={styles.submitButton} disabled={gameOver || isProcessing}>
           Submit
         </button>
       </form>
