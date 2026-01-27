@@ -16,6 +16,7 @@ function Play({ goBack }) {
   const [totalSessionScore, setTotalSessionScore] = useState(0);
   const [allSessionResults, setAllSessionResults] = useState([]);
   const [usedWordIds, setUsedWordIds] = useState(new Set());
+  const [allUsedWordIds, setAllUsedWordIds] = useState(new Set());
   const [questionsInLevel, setQuestionsInLevel] = useState(0);
   const [levelCompleted, setLevelCompleted] = useState(false);
   const [levelStats, setLevelStats] = useState({
@@ -23,17 +24,16 @@ function Play({ goBack }) {
     streakBonusTotal: 0,
     levelBonus: 0,
   });
-  const [isProcessing, setIsProcessing] = useState(false);
 
   const QUESTIONS_PER_LEVEL = 10;
 
   const playSound = (type) => {
+    const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
+    const volume = parseFloat(localStorage.getItem("volume")) || 70;
+
+    if (!soundEnabled) return;
+
     try {
-      const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
-      const volume = parseFloat(localStorage.getItem("volume")) || 70;
-
-      if (!soundEnabled) return;
-
       const audioContext = new (window.AudioContext ||
         window.webkitAudioContext)();
       const osc = audioContext.createOscillator();
@@ -64,50 +64,55 @@ function Play({ goBack }) {
       }
       osc.start();
       osc.stop(audioContext.currentTime + 0.4);
-    } catch (error) {
-      console.warn("Audio error:", error);
-    }
+    } catch (e) {}
   };
 
   const fetchWordsForLevel = async (levelNumber) => {
     try {
-      let maxDifficulty = 3;
-      if (levelNumber >= 61) {
+      // Difficulty based on level: 1-9 use 1-5, 10+ use any (1-10)
+      let maxDifficulty = 5;
+      if (levelNumber >= 10) {
         maxDifficulty = 10;
-      } else if (levelNumber >= 31) {
-        maxDifficulty = 7;
-      } else if (levelNumber >= 11) {
-        maxDifficulty = 5;
       }
 
-      const randomOffset = Math.floor(Math.random() * 50);
+      console.log(
+        `[Level ${levelNumber}] Fetching words with difficulty <= ${maxDifficulty}`
+      );
+      console.log(
+        `[Level ${levelNumber}] Already used globally: ${allUsedWordIds.size} words`
+      );
 
-      let { data, error } = await supabase
+      const { data, error } = await supabase
         .from("words")
         .select("*")
-        .lte("difficulty", maxDifficulty)
-        .range(randomOffset, randomOffset + 9);
+        .lte("difficulty", maxDifficulty);
 
       if (error) throw error;
 
-      if (!data || data.length < 10) {
-        const { data: allData, error: allError } = await supabase
-          .from("words")
-          .select("*")
-          .lte("difficulty", maxDifficulty)
-          .limit(10);
-
-        if (allError) throw allError;
-        data = allData || [];
+      if (!data || data.length === 0) {
+        console.error("No words available in database");
+        throw new Error("No words available");
       }
 
-      const availableWords = data.filter((w) => !usedWordIds.has(w.id));
-      const shuffled = availableWords.sort(() => Math.random() - 0.5);
+      const availableWords = data.filter(
+        (w) => !allUsedWordIds.has(w.id) && !usedWordIds.has(w.id)
+      );
 
-      return shuffled.length > 0 ? shuffled : data.sort(() => Math.random() - 0.5);
+      console.log(
+        `[Level ${levelNumber}] Available (not used): ${availableWords.length} words`
+      );
+
+      if (availableWords.length < QUESTIONS_PER_LEVEL) {
+        console.warn(
+          `[Level ${levelNumber}] Only ${availableWords.length} unique words available, need ${QUESTIONS_PER_LEVEL}`
+        );
+      }
+
+      const shuffled = availableWords.sort(() => Math.random() - 0.5);
+      return shuffled.slice(0, QUESTIONS_PER_LEVEL);
     } catch (error) {
       console.error("Error fetching words:", error);
-      return [];
+      throw error;
     }
   };
 
@@ -116,15 +121,9 @@ function Play({ goBack }) {
       setLoading(true);
       try {
         const firstLevelWords = await fetchWordsForLevel(1);
-        if (firstLevelWords && firstLevelWords.length > 0) {
-          setWords(firstLevelWords);
-          setCurrentLevel(1);
-          setQuestionsInLevel(0);
-        } else {
-          console.error("No words loaded");
-          alert("Failed to load words.");
-          goBack();
-        }
+        setWords(firstLevelWords);
+        setCurrentLevel(1);
+        setQuestionsInLevel(0);
       } catch (error) {
         console.error("Error initializing game:", error);
         alert("Failed to load words.");
@@ -145,7 +144,7 @@ function Play({ goBack }) {
     );
   }
 
-  if (!words || words.length === 0) {
+  if (words.length === 0) {
     return (
       <div style={styles.loadingContainer}>
         <h1 style={styles.loadingText}>No words available</h1>
@@ -158,138 +157,142 @@ function Play({ goBack }) {
 
   const currentWord = words[currentIndex];
 
-  if (!currentWord) {
-    return (
-      <div style={styles.loadingContainer}>
-        <h1 style={styles.loadingText}>Error loading word</h1>
-        <button onClick={goBack} style={styles.primaryButton}>
-          Back to Menu
-        </button>
-      </div>
-    );
-  }
-
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    if (isProcessing) return;
-    setIsProcessing(true);
+    const userAnswer = answer.toLowerCase().trim();
 
-    try {
-      const userAnswer = answer.toLowerCase().trim();
+    const normalize = (str) => {
+      return str
+        .toLowerCase()
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\w\s]/g, "")
+        .replace(/ï/g, "i")
+        .replace(/ü/g, "u")
+        .replace(/ö/g, "o")
+        .replace(/\s+/g, " ");
+    };
 
-      const normalize = (str) => {
-        return str
-          .toLowerCase()
-          .trim()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^\w\s]/g, "")
-          .replace(/ï/g, "i")
-          .replace(/ü/g, "u")
-          .replace(/ö/g, "o")
-          .replace(/\s+/g, " ");
-      };
+    const correctFull = currentWord.dutch.toLowerCase().trim();
+    const correctBase = correctFull
+      .split(",")[0]
+      .replace(/^(de |het |een |het )/, "")
+      .trim();
 
-      const correctFull = currentWord.dutch.toLowerCase().trim();
-      const correctBase = correctFull
-        .split(",")[0]
-        .replace(/^(de |het |een |het )/, "")
-        .trim();
+    const normalizedAnswer = normalize(userAnswer);
+    const normalizedFull = normalize(correctFull);
+    const normalizedBase = normalize(correctBase);
+    const normalizedWithDe = normalize(`de ${correctBase}`);
+    const normalizedWithHet = normalize(`het ${correctBase}`);
 
-      const normalizedAnswer = normalize(userAnswer);
-      const normalizedFull = normalize(correctFull);
-      const normalizedBase = normalize(correctBase);
-      const normalizedWithDe = normalize(`de ${correctBase}`);
-      const normalizedWithHet = normalize(`het ${correctBase}`);
+    const isCorrect =
+      normalizedAnswer === normalizedFull ||
+      normalizedAnswer === normalizedBase ||
+      normalizedAnswer === normalizedWithDe ||
+      normalizedAnswer === normalizedWithHet;
 
-      const isCorrect =
-        normalizedAnswer === normalizedFull ||
-        normalizedAnswer === normalizedBase ||
-        normalizedAnswer === normalizedWithDe ||
-        normalizedAnswer === normalizedWithHet;
+    let newScore = score;
+    let newStreak = streak;
+    let newLives = lives;
+    let streakBonusThisRound = 0;
 
-      let newScore = score;
-      let newStreak = streak;
-      let newLives = lives;
-      let streakBonusThisRound = 0;
+    const wordPoints = currentWord.difficulty || 1;
 
-      const wordPoints = currentWord.difficulty || 1;
+    if (isCorrect) {
+      playSound("correct");
+      newScore += wordPoints;
+      newStreak += 1;
 
-      if (isCorrect) {
-        playSound("correct");
-        newScore += wordPoints;
-        newStreak += 1;
+      streakBonusThisRound = newStreak;
+      newScore += streakBonusThisRound;
 
-        streakBonusThisRound = newStreak;
-        newScore += streakBonusThisRound;
+      setFeedback(
+        `✅ Correct! +${wordPoints} pts${
+          streakBonusThisRound > 0 ? ` +${streakBonusThisRound} streak` : ""
+        }`
+      );
 
-        setFeedback(
-          `✅ Correct!\n+${wordPoints} pts\n+${streakBonusThisRound} streak`
-        );
+      if (newStreak % 3 === 0) {
+        setTimeout(() => playSound("bonus"), 200);
+      }
+    } else {
+      playSound("wrong");
+      newLives -= 1;
+      newStreak = 0;
+      setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
+    }
 
-        if (newStreak % 3 === 0) {
-          setTimeout(() => playSound("bonus"), 200);
+    const newUsedWords = new Set(usedWordIds);
+    newUsedWords.add(currentWord.id);
+    setUsedWordIds(newUsedWords);
+
+    const newAllUsedWords = new Set(allUsedWordIds);
+    newAllUsedWords.add(currentWord.id);
+    setAllUsedWordIds(newAllUsedWords);
+
+    const newSessionResult = {
+      word: currentWord.english,
+      dutch: currentWord.dutch,
+      correct: isCorrect,
+      answer: userAnswer,
+      level: currentLevel,
+    };
+
+    setSessionResults([...sessionResults, newSessionResult]);
+    setAllSessionResults([...allSessionResults, newSessionResult]);
+    setScore(newScore);
+    setLives(newLives);
+    setStreak(newStreak);
+    setAnswer("");
+
+    const newQuestionsInLevel = questionsInLevel + 1;
+    setQuestionsInLevel(newQuestionsInLevel);
+
+    if (isCorrect) {
+      setLevelStats((prev) => ({
+        ...prev,
+        correctCount: prev.correctCount + 1,
+        streakBonusTotal: prev.streakBonusTotal + streakBonusThisRound,
+      }));
+    }
+
+    if (newLives <= 0) {
+      setTimeout(() => {
+        saveSessionAuto(newScore + totalSessionScore, allSessionResults);
+        setGameOver(true);
+      }, 2000);
+    } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
+      setTimeout(() => {
+        nextLevel(newScore, newQuestionsInLevel);
+      }, 2000);
+    } else if (currentIndex >= words.length - 1) {
+      setTimeout(() => {
+        nextLevel(newScore, newQuestionsInLevel);
+      }, 2000);
+    } else {
+      setTimeout(() => {
+        const nextIndex = currentIndex + 1;
+        if (nextIndex < words.length) {
+          if (words[nextIndex].id === currentWord.id) {
+            let findIndex = nextIndex + 1;
+            while (
+              findIndex < words.length &&
+              words[findIndex].id === currentWord.id
+            ) {
+              findIndex++;
+            }
+            if (findIndex < words.length) {
+              setCurrentIndex(findIndex);
+            } else {
+              setCurrentIndex(nextIndex);
+            }
+          } else {
+            setCurrentIndex(nextIndex);
+          }
         }
-      } else {
-        playSound("wrong");
-        newLives -= 1;
-        newStreak = 0;
-        setFeedback(`❌ Wrong!\nThe answer is '${currentWord.dutch}'.`);
-      }
-
-      const newUsedWords = new Set(usedWordIds);
-      newUsedWords.add(currentWord.id);
-      setUsedWordIds(newUsedWords);
-
-      const newSessionResult = {
-        word: currentWord.english,
-        dutch: currentWord.dutch,
-        correct: isCorrect,
-        answer: userAnswer,
-        level: currentLevel,
-      };
-
-      setSessionResults((prev) => [...prev, newSessionResult]);
-      setAllSessionResults((prev) => [...prev, newSessionResult]);
-      setScore(newScore);
-      setLives(newLives);
-      setStreak(newStreak);
-      setAnswer("");
-
-      const newQuestionsInLevel = questionsInLevel + 1;
-      setQuestionsInLevel(newQuestionsInLevel);
-
-      if (isCorrect) {
-        setLevelStats((prev) => ({
-          ...prev,
-          correctCount: prev.correctCount + 1,
-          streakBonusTotal: prev.streakBonusTotal + streakBonusThisRound,
-        }));
-      }
-
-      if (newLives <= 0) {
-        setTimeout(() => {
-          saveSessionAuto(newScore + totalSessionScore, allSessionResults);
-          setGameOver(true);
-          setIsProcessing(false);
-        }, 2000);
-      } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
-        setTimeout(() => {
-          nextLevel(newScore, newQuestionsInLevel);
-          setIsProcessing(false);
-        }, 2000);
-      } else {
-        setTimeout(() => {
-          setCurrentIndex((prevIdx) => Math.min(prevIdx + 1, words.length - 1));
-          setFeedback("");
-          setIsProcessing(false);
-        }, 1500);
-      }
-    } catch (error) {
-      console.error("Error in handleSubmit:", error);
-      setIsProcessing(false);
-      alert("An error occurred. Please try again.");
+        setFeedback("");
+      }, 2000);
     }
   };
 
@@ -325,25 +328,24 @@ function Play({ goBack }) {
     try {
       setLoading(true);
       const nextLevelWords = await fetchWordsForLevel(nextLevelNumber);
-      
-      if (nextLevelWords && nextLevelWords.length > 0) {
-        setWords(nextLevelWords);
-        setCurrentLevel(nextLevelNumber);
-        setCurrentIndex(0);
-        setAnswer("");
-        setFeedback("");
-        setScore(0);
-        setStreak(0);
-        setQuestionsInLevel(0);
-        setTotalSessionScore(
-          totalSessionScore + levelStats.correctCount * currentLevel + levelStats.streakBonusTotal + levelStats.levelBonus
-        );
-        setSessionResults([]);
-        setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
-        setLevelCompleted(false);
-      } else {
-        throw new Error("No words loaded for next level");
-      }
+      setWords(nextLevelWords);
+      setCurrentLevel(nextLevelNumber);
+      setCurrentIndex(0);
+      setAnswer("");
+      setFeedback("");
+      setScore(0);
+      setStreak(0);
+      setQuestionsInLevel(0);
+      setUsedWordIds(new Set());
+      setTotalSessionScore(
+        totalSessionScore +
+          levelStats.correctCount * currentLevel +
+          levelStats.streakBonusTotal +
+          levelStats.levelBonus
+      );
+      setSessionResults([]);
+      setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
+      setLevelCompleted(false);
     } catch (error) {
       console.error("Error loading next level:", error);
       alert("Failed to load next level.");
@@ -356,18 +358,7 @@ function Play({ goBack }) {
 
   const saveSessionAuto = async (finalScore, results) => {
     try {
-      if (!results || results.length === 0) {
-        console.warn("No results to save");
-        return;
-      }
-
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      
-      if (userError || !userData?.user?.id) {
-        console.error("User error:", userError);
-        return;
-      }
-
+      const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user.id;
       const correctCount = results.filter((r) => r.correct).length;
 
@@ -396,71 +387,57 @@ function Play({ goBack }) {
       }
 
       for (const [wordEnglish, correctArray] of uniqueWords) {
-        try {
-          const word = words.find((w) => w.english === wordEnglish);
-          if (!word) continue;
+        const word = words.find((w) => w.english === wordEnglish);
+        if (!word) continue;
 
-          const correctCountForWord = correctArray.filter((c) => c).length;
-          const incorrectCountForWord = correctArray.filter((c) => !c).length;
+        const correctCountWord = correctArray.filter((c) => c).length;
+        const incorrectCount = correctArray.filter((c) => !c).length;
 
-          const { data: existingProgress, error: fetchError } = await supabase
-            .from("user_progress")
-            .select("*")
-            .eq("user_id", userId)
-            .eq("word_id", word.id)
-            .single();
+        const { data: existingProgress, error: fetchError } = await supabase
+          .from("user_progress")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("word_id", word.id)
+          .single();
 
-          if (fetchError && fetchError.code !== "PGRST116") {
-            console.error("Fetch error:", fetchError);
-            continue;
-          }
-
-          if (existingProgress) {
-            const newCorrectCount = existingProgress.correct_count + correctCountForWord;
-            const newIncorrectCount = existingProgress.incorrect_count + incorrectCountForWord;
-            const isMastered = newCorrectCount >= 10;
-
-            await supabase
-              .from("user_progress")
-              .update({
-                correct_count: newCorrectCount,
-                incorrect_count: newIncorrectCount,
-                mastered: isMastered,
-                last_seen_at: new Date(),
-              })
-              .eq("id", existingProgress.id);
-          } else {
-            await supabase.from("user_progress").insert([
-              {
-                user_id: userId,
-                word_id: word.id,
-                correct_count: correctCountForWord,
-                incorrect_count: incorrectCountForWord,
-                mastered: false,
-                last_seen_at: new Date(),
-              },
-            ]);
-          }
-        } catch (error) {
-          console.error("Error saving word progress:", error);
+        if (fetchError && fetchError.code !== "PGRST116") {
+          console.error("Fetch error:", fetchError);
           continue;
+        }
+
+        if (existingProgress) {
+          const newCorrectCount =
+            existingProgress.correct_count + correctCountWord;
+          const newIncorrectCount =
+            existingProgress.incorrect_count + incorrectCount;
+          const isMastered = newCorrectCount >= 10;
+
+          await supabase
+            .from("user_progress")
+            .update({
+              correct_count: newCorrectCount,
+              incorrect_count: newIncorrectCount,
+              mastered: isMastered,
+              last_seen_at: new Date(),
+            })
+            .eq("id", existingProgress.id);
+        } else {
+          await supabase.from("user_progress").insert([
+            {
+              user_id: userId,
+              word_id: word.id,
+              correct_count: correctCountWord,
+              incorrect_count: incorrectCount,
+              mastered: false,
+              last_seen_at: new Date(),
+            },
+          ]);
         }
       }
 
-      console.log("Session saved successfully!");
+      console.log("Session saved automatically!");
     } catch (error) {
       console.error("Error saving session:", error);
-    }
-  };
-
-  const handleQuitGame = async () => {
-    try {
-      const finalScore = totalSessionScore + score;
-      await saveSessionAuto(finalScore, allSessionResults);
-      setGameOver(true);
-    } catch (error) {
-      console.error("Error in handleQuitGame:", error);
-      setGameOver(true);
     }
   };
 
@@ -490,7 +467,9 @@ function Play({ goBack }) {
 
     return (
       <div style={styles.levelCompleteContainer}>
-        <h1 style={styles.levelCompleteTitle}>🎉 Level {currentLevel} Complete!</h1>
+        <h1 style={styles.levelCompleteTitle}>
+          🎉 Level {currentLevel} Complete!
+        </h1>
 
         <div style={styles.breakdownContainer}>
           <div style={styles.breakdownRow}>
@@ -503,24 +482,32 @@ function Play({ goBack }) {
 
           <div style={styles.breakdownRow}>
             <span style={styles.breakdownLabel}>Streak Bonuses</span>
-            <span style={styles.breakdownValue}>+{levelStats.streakBonusTotal} pts</span>
+            <span style={styles.breakdownValue}>
+              +{levelStats.streakBonusTotal} pts
+            </span>
           </div>
 
           <div style={styles.breakdownRow}>
             <span style={styles.breakdownLabel}>Level Bonus</span>
-            <span style={styles.breakdownValue}>+{levelStats.levelBonus} pts</span>
+            <span style={styles.breakdownValue}>
+              +{levelStats.levelBonus} pts
+            </span>
           </div>
 
           <div style={styles.breakdownDivider} />
 
           <div style={styles.breakdownRow}>
             <span style={styles.breakdownLabel}>Level Total</span>
-            <span style={styles.breakdownValueTotal}>+{levelTotalScore} pts</span>
+            <span style={styles.breakdownValueTotal}>
+              +{levelTotalScore} pts
+            </span>
           </div>
 
           <div style={styles.breakdownRow}>
             <span style={styles.breakdownLabel}>Game Total</span>
-            <span style={styles.breakdownValueSession}>{sessionTotalScore} pts</span>
+            <span style={styles.breakdownValueSession}>
+              {sessionTotalScore} pts
+            </span>
           </div>
         </div>
 
@@ -566,8 +553,9 @@ function Play({ goBack }) {
         }
       });
 
-    const missedWords = Array.from(missedWordsMap.values())
-      .sort((a, b) => b.attempts - a.attempts);
+    const missedWords = Array.from(missedWordsMap.values()).sort(
+      (a, b) => b.attempts - a.attempts
+    );
 
     return (
       <div style={styles.gameOverContainer}>
@@ -605,8 +593,9 @@ function Play({ goBack }) {
             <div style={styles.missedWordsTable}>
               {missedWords.slice(0, 10).map((item, idx) => {
                 const total = item.correct + item.incorrect;
-                const masteryPercent = total > 0 ? Math.round((item.correct / total) * 100) : 0;
-                
+                const masteryPercent =
+                  total > 0 ? Math.round((item.correct / total) * 100) : 0;
+
                 return (
                   <div key={idx} style={styles.missedWordRow}>
                     <div style={styles.missedWordLeft}>
@@ -652,7 +641,7 @@ function Play({ goBack }) {
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
-            onClick={handleQuitGame}
+            onClick={goBack}
             style={styles.backButton}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "#0891b2";
@@ -714,28 +703,23 @@ function Play({ goBack }) {
           onChange={(e) => setAnswer(e.target.value)}
           placeholder="Type the translation..."
           style={styles.input}
-          disabled={gameOver || isProcessing}
+          disabled={gameOver}
           autoFocus
         />
-        <button type="submit" style={styles.submitButton} disabled={gameOver || isProcessing}>
+        <button type="submit" style={styles.submitButton} disabled={gameOver}>
           Submit
         </button>
       </form>
 
       {feedback && (
-        <div style={styles.feedbackContainer}>
-          {feedback.split("\n").map((line, idx) => (
-            <p
-              key={idx}
-              style={{
-                ...styles.feedback,
-                color: feedback.includes("✅") ? "#10b981" : "#ef4444",
-              }}
-            >
-              {line}
-            </p>
-          ))}
-        </div>
+        <p
+          style={{
+            ...styles.feedback,
+            color: feedback.includes("✅") ? "#10b981" : "#ef4444",
+          }}
+        >
+          {feedback}
+        </p>
       )}
     </div>
   );
@@ -746,7 +730,8 @@ const styles = {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     padding: "0",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     display: "flex",
     flexDirection: "column",
   },
@@ -892,20 +877,13 @@ const styles = {
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
-  feedbackContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    margin: "12px 20px 0",
-    gap: "4px",
-  },
   feedback: {
     fontSize: "clamp(13px, 3vw, 14px)",
     fontWeight: "600",
-    minHeight: "20px",
+    margin: "12px 20px 0",
+    minHeight: "24px",
     textAlign: "center",
     color: "#10b981",
-    margin: "0",
   },
   levelCompleteContainer: {
     minHeight: "100vh",
@@ -915,7 +893,8 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     padding: "20px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
   levelCompleteTitle: {
     fontSize: "clamp(28px, 6vw, 40px)",
@@ -981,7 +960,8 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     padding: "16px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     overflowY: "auto",
   },
   gameOverHeader: {
@@ -1141,7 +1121,8 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     padding: "20px",
   },
   loadingText: {
