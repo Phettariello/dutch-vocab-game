@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 
+
 function Review({ goBack }) {
   const [words, setWords] = useState([]);
   const [reviewWords, setReviewWords] = useState([]);
@@ -11,24 +12,26 @@ function Review({ goBack }) {
   const [showAnswer, setShowAnswer] = useState(false);
   const [userId, setUserId] = useState(null);
 
+
   // Filter states
   const [selectedCategories, setSelectedCategories] = useState(new Set());
-  const [selectedDifficulties, setSelectedDifficulties] = useState(
-    new Set(["beginner", "medium", "advanced"])
-  );
-  const [onlyNonMastered, setOnlyNonMastered] = useState(true);
+  const [selectedDifficulties, setSelectedDifficulties] = useState(new Set());
+  const [showMastered, setShowMastered] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+
 
   // UI states
   const [categories, setCategories] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const inputRef = useRef(null);
 
+
   // ============================================================================
   // FUNCTION: Update user progress (salva direttamente in user_progress)
   // ============================================================================
   const updateUserProgress = async (wordId, isCorrect) => {
     if (!userId) return;
+
 
     try {
       // 1. Cerca se esiste già user_progress per questa word
@@ -39,10 +42,12 @@ function Review({ goBack }) {
         .eq("word_id", wordId)
         .single();
 
+
       if (fetchError && fetchError.code !== "PGRST116") {
         console.error("Fetch error:", fetchError);
         return;
       }
+
 
       if (existing) {
         // 2. UPDATE: incrementa correct_count o incorrect_count
@@ -53,6 +58,7 @@ function Review({ goBack }) {
           ? existing.incorrect_count + 1
           : existing.incorrect_count;
         const isMastered = newCorrectCount >= 10;
+
 
         await supabase
           .from("user_progress")
@@ -81,6 +87,7 @@ function Review({ goBack }) {
     }
   };
 
+
   // ============================================================================
   // EFFECT: Load words with progress
   // ============================================================================
@@ -91,22 +98,26 @@ function Review({ goBack }) {
         const { data: userData } = await supabase.auth.getUser();
         const currentUserId = userData.user?.id;
 
+
         if (!currentUserId) {
           alert("You must be logged in to use Review Mode.");
           goBack();
           return;
         }
 
+
         setUserId(currentUserId);
 
-        // Get user's non-mastered words
+
+        // Get all user's words (mastered + non-mastered)
         const { data: userProgress, error: progressError } = await supabase
           .from("user_progress")
           .select("word_id, correct_count, incorrect_count, mastered")
-          .eq("user_id", currentUserId)
-          .eq("mastered", false);
+          .eq("user_id", currentUserId);
+
 
         if (progressError) throw progressError;
+
 
         if (userProgress.length === 0) {
           setWords([]);
@@ -114,7 +125,9 @@ function Review({ goBack }) {
           return;
         }
 
+
         const wordIds = userProgress.map((p) => p.word_id);
+
 
         // Get word details
         const { data: wordDetails, error: wordsError } = await supabase
@@ -122,7 +135,9 @@ function Review({ goBack }) {
           .select("*")
           .in("id", wordIds);
 
+
         if (wordsError) throw wordsError;
+
 
         // Merge word details with progress
         const wordsWithProgress = wordDetails.map((word) => {
@@ -136,13 +151,16 @@ function Review({ goBack }) {
                 )
               : 0;
 
+
           return {
             ...word,
             correct_count: progress.correct_count,
             incorrect_count: progress.incorrect_count,
             masteryPercent,
+            mastered: progress.mastered,
           };
         });
+
 
         // Extract unique categories
         const uniqueCategories = [
@@ -150,8 +168,14 @@ function Review({ goBack }) {
         ].sort();
         setCategories(uniqueCategories);
 
+
         // Initialize all categories as selected
         setSelectedCategories(new Set(uniqueCategories));
+
+
+        // Initialize all difficulties (1-10) as selected
+        setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+
 
         setWords(wordsWithProgress);
       } catch (error) {
@@ -161,14 +185,17 @@ function Review({ goBack }) {
       }
     };
 
+
     fetchWordsToReview();
   }, []);
+
 
   // ============================================================================
   // EFFECT: Apply filters and shuffle
   // ============================================================================
   useEffect(() => {
     let filtered = words;
+
 
     // Filter by category
     if (selectedCategories.size > 0) {
@@ -177,22 +204,20 @@ function Review({ goBack }) {
       );
     }
 
-    // Filter by difficulty
+
+    // Filter by difficulty (1-10)
     if (selectedDifficulties.size > 0) {
-      filtered = filtered.filter((w) => {
-        const diff = w.difficulty;
-        if (selectedDifficulties.has("beginner") && diff <= 3) return true;
-        if (selectedDifficulties.has("medium") && diff >= 4 && diff <= 6)
-          return true;
-        if (selectedDifficulties.has("advanced") && diff >= 7) return true;
-        return false;
-      });
+      filtered = filtered.filter((w) =>
+        selectedDifficulties.has(w.difficulty)
+      );
     }
 
-    // Filter non-mastered
-    if (onlyNonMastered) {
+
+    // Filter mastered words
+    if (!showMastered) {
       filtered = filtered.filter((w) => !w.mastered);
     }
+
 
     // Shuffle if enabled
     if (shuffle) {
@@ -204,9 +229,11 @@ function Review({ goBack }) {
       );
     }
 
+
     setReviewWords(filtered);
     setCurrentIndex(0);
-  }, [words, selectedCategories, selectedDifficulties, onlyNonMastered, shuffle]);
+  }, [words, selectedCategories, selectedDifficulties, showMastered, shuffle]);
+
 
   // ============================================================================
   // EFFECT: Auto-focus input on mount and after answer
@@ -217,6 +244,7 @@ function Review({ goBack }) {
     }, 300);
     return () => clearTimeout(timer);
   }, [currentIndex, showAnswer]);
+
 
   // ============================================================================
   // FUNCTION: Normalize text for comparison
@@ -234,6 +262,7 @@ function Review({ goBack }) {
       .replace(/\s+/g, " ");
   };
 
+
   // ============================================================================
   // FUNCTION: Handle answer submission
   // ============================================================================
@@ -241,11 +270,13 @@ function Review({ goBack }) {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
 
+
     const correctFull = reviewWords[currentIndex].dutch.toLowerCase().trim();
     const correctBase = correctFull
       .split(",")[0]
       .replace(/^(de |het |een |het )/, "")
       .trim();
+
 
     const normalizedAnswer = normalize(userAnswer);
     const normalizedFull = normalize(correctFull);
@@ -253,14 +284,17 @@ function Review({ goBack }) {
     const normalizedWithDe = normalize(`de ${correctBase}`);
     const normalizedWithHet = normalize(`het ${correctBase}`);
 
+
     const isCorrect =
       normalizedAnswer === normalizedFull ||
       normalizedAnswer === normalizedBase ||
       normalizedAnswer === normalizedWithDe ||
       normalizedAnswer === normalizedWithHet;
 
+
     // 🔥 SALVA PROGRESSO SU DATABASE
     await updateUserProgress(reviewWords[currentIndex].id, isCorrect);
+
 
     if (isCorrect) {
       setFeedback("✅ Correct!");
@@ -268,8 +302,10 @@ function Review({ goBack }) {
       setFeedback(`❌ Wrong! The answer is '${reviewWords[currentIndex].dutch}'.`);
     }
 
+
     setShowAnswer(true);
   };
+
 
   // ============================================================================
   // FUNCTION: Navigate to next word
@@ -283,6 +319,7 @@ function Review({ goBack }) {
     }
   };
 
+
   // ============================================================================
   // FUNCTION: Navigate to previous word
   // ============================================================================
@@ -294,6 +331,7 @@ function Review({ goBack }) {
       setShowAnswer(false);
     }
   };
+
 
   // ============================================================================
   // FUNCTION: Toggle category filter
@@ -308,6 +346,19 @@ function Review({ goBack }) {
     setSelectedCategories(newSet);
   };
 
+
+  // ============================================================================
+  // FUNCTION: Select All/Deselect All categories
+  // ============================================================================
+  const toggleAllCategories = () => {
+    if (selectedCategories.size === categories.length) {
+      setSelectedCategories(new Set());
+    } else {
+      setSelectedCategories(new Set(categories));
+    }
+  };
+
+
   // ============================================================================
   // FUNCTION: Toggle difficulty filter
   // ============================================================================
@@ -321,16 +372,30 @@ function Review({ goBack }) {
     setSelectedDifficulties(newSet);
   };
 
+
+  // ============================================================================
+  // FUNCTION: Select All/Deselect All difficulties
+  // ============================================================================
+  const toggleAllDifficulties = () => {
+    if (selectedDifficulties.size === 10) {
+      setSelectedDifficulties(new Set());
+    } else {
+      setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+    }
+  };
+
+
   // ============================================================================
   // LOADING STATE
   // ============================================================================
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>Loading Review Words...</h1>
+        <h1 style={styles.loadingText}>Loading Review Words...</h1>
       </div>
     );
   }
+
 
   // ============================================================================
   // EMPTY STATE
@@ -338,14 +403,15 @@ function Review({ goBack }) {
   if (words.length === 0) {
     return (
       <div style={styles.loadingContainer}>
-        <h1>🎉 No words to review!</h1>
-        <p>All your words are mastered. Great job!</p>
+        <h1 style={styles.loadingText}>🎉 No words to review!</h1>
+        <p style={styles.loadingSubtext}>All your words are mastered. Great job!</p>
         <button onClick={goBack} style={styles.secondaryButton}>
           Back to Menu
         </button>
       </div>
     );
   }
+
 
   // ============================================================================
   // NO WORDS AFTER FILTERS
@@ -354,10 +420,23 @@ function Review({ goBack }) {
     return (
       <div style={styles.container}>
         <div style={styles.header}>
-          <div style={styles.headerTop}>
-            <h1 style={styles.title}>📚 Review Mode</h1>
-          </div>
+          <h1 style={styles.title}>📚 Review</h1>
+          <button
+            onClick={goBack}
+            style={styles.backButton}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#0891b2";
+              e.currentTarget.style.transform = "scale(1.05)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#06b6d4";
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
+            ← Menu
+          </button>
         </div>
+
 
         <div style={styles.filtersPanel}>
           <button
@@ -367,11 +446,22 @@ function Review({ goBack }) {
             🔧 Filters {filtersOpen ? "▼" : "▶"}
           </button>
 
+
           {filtersOpen && (
             <div style={styles.filtersContent}>
               {/* Categories */}
               <div style={styles.filterGroup}>
-                <h4 style={styles.filterTitle}>Categories</h4>
+                <div style={styles.filterHeader}>
+                  <h4 style={styles.filterTitle}>Categories</h4>
+                  <button
+                    onClick={toggleAllCategories}
+                    style={styles.selectAllBtn}
+                  >
+                    {selectedCategories.size === categories.length
+                      ? "Deselect All"
+                      : "Select All"}
+                  </button>
+                </div>
                 <div style={styles.checkboxGroup}>
                   {categories.map((cat) => (
                     <label key={cat} style={styles.checkboxLabel}>
@@ -387,52 +477,47 @@ function Review({ goBack }) {
                 </div>
               </div>
 
+
               {/* Difficulty */}
               <div style={styles.filterGroup}>
-                <h4 style={styles.filterTitle}>Difficulty</h4>
-                <div style={styles.checkboxGroup}>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDifficulties.has("beginner")}
-                      onChange={() => toggleDifficulty("beginner")}
-                      style={styles.checkbox}
-                    />
-                    Beginner (1-3)
-                  </label>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDifficulties.has("medium")}
-                      onChange={() => toggleDifficulty("medium")}
-                      style={styles.checkbox}
-                    />
-                    Medium (4-6)
-                  </label>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDifficulties.has("advanced")}
-                      onChange={() => toggleDifficulty("advanced")}
-                      style={styles.checkbox}
-                    />
-                    Advanced (7-10)
-                  </label>
+                <div style={styles.filterHeader}>
+                  <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+                  <button
+                    onClick={toggleAllDifficulties}
+                    style={styles.selectAllBtn}
+                  >
+                    {selectedDifficulties.size === 10 ? "Deselect All" : "Select All"}
+                  </button>
+                </div>
+                <div style={styles.difficultyGrid}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                    <label key={level} style={styles.checkboxLabelSmall}>
+                      <input
+                        type="checkbox"
+                        checked={selectedDifficulties.has(level)}
+                        onChange={() => toggleDifficulty(level)}
+                        style={styles.checkbox}
+                      />
+                      {level}
+                    </label>
+                  ))}
                 </div>
               </div>
 
-              {/* Non-Mastered */}
+
+              {/* Show Mastered */}
               <div style={styles.filterGroup}>
                 <label style={styles.checkboxLabel}>
                   <input
                     type="checkbox"
-                    checked={onlyNonMastered}
-                    onChange={(e) => setOnlyNonMastered(e.target.checked)}
+                    checked={showMastered}
+                    onChange={(e) => setShowMastered(e.target.checked)}
                     style={styles.checkbox}
                   />
-                  Only non-mastered words
+                  Include mastered words
                 </label>
               </div>
+
 
               {/* Shuffle */}
               <div style={styles.filterGroup}>
@@ -450,10 +535,12 @@ function Review({ goBack }) {
           )}
         </div>
 
+
         <div style={styles.emptyMessage}>
-          <p>No words to review with current filters.</p>
-          <p>Try adjusting your settings above.</p>
+          <p style={styles.emptyMessageText}>No words to review with current filters.</p>
+          <p style={styles.emptyMessageText}>Try adjusting your settings above.</p>
         </div>
+
 
         <button onClick={goBack} style={styles.secondaryButton}>
           Back to Menu
@@ -462,7 +549,9 @@ function Review({ goBack }) {
     );
   }
 
+
   const currentWord = reviewWords[currentIndex];
+
 
   // ============================================================================
   // MAIN RENDER
@@ -471,18 +560,34 @@ function Review({ goBack }) {
     <div style={styles.container}>
       {/* HEADER - STICKY */}
       <div style={styles.header}>
-        <div style={styles.headerTop}>
-          <h1 style={styles.title}>📚 Review</h1>
-        </div>
-        <div style={styles.progressBar}>
-          <div
-            style={{
-              ...styles.progressFill,
-              width: `${((currentIndex + 1) / reviewWords.length) * 100}%`,
-            }}
-          />
-        </div>
+        <h1 style={styles.title}>📚 Review</h1>
+        <button
+          onClick={goBack}
+          style={styles.backButton}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ← Menu
+        </button>
       </div>
+
+
+      {/* PROGRESS BAR */}
+      <div style={styles.progressBar}>
+        <div
+          style={{
+            ...styles.progressFill,
+            width: `${((currentIndex + 1) / reviewWords.length) * 100}%`,
+          }}
+        />
+      </div>
+
 
       {/* STATS GRID - COMPACT ON MOBILE */}
       <div style={styles.statsGrid}>
@@ -500,6 +605,7 @@ function Review({ goBack }) {
         </div>
       </div>
 
+
       {/* MASTERY BAR */}
       <div style={styles.masteryBarContainer}>
         <div style={styles.masteryBar}>
@@ -515,6 +621,7 @@ function Review({ goBack }) {
         </div>
       </div>
 
+
       {/* FILTERS PANEL */}
       <div style={styles.filtersPanel}>
         <button
@@ -524,11 +631,22 @@ function Review({ goBack }) {
           🔧 Filters {filtersOpen ? "▼" : "▶"}
         </button>
 
+
         {filtersOpen && (
           <div style={styles.filtersContent}>
             {/* Categories */}
             <div style={styles.filterGroup}>
-              <h4 style={styles.filterTitle}>Categories</h4>
+              <div style={styles.filterHeader}>
+                <h4 style={styles.filterTitle}>Categories</h4>
+                <button
+                  onClick={toggleAllCategories}
+                  style={styles.selectAllBtn}
+                >
+                  {selectedCategories.size === categories.length
+                    ? "Deselect All"
+                    : "Select All"}
+                </button>
+              </div>
               <div style={styles.checkboxGroup}>
                 {categories.map((cat) => (
                   <label key={cat} style={styles.checkboxLabel}>
@@ -544,52 +662,47 @@ function Review({ goBack }) {
               </div>
             </div>
 
+
             {/* Difficulty */}
             <div style={styles.filterGroup}>
-              <h4 style={styles.filterTitle}>Difficulty</h4>
-              <div style={styles.checkboxGroup}>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDifficulties.has("beginner")}
-                    onChange={() => toggleDifficulty("beginner")}
-                    style={styles.checkbox}
-                  />
-                  Beginner (1-3)
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDifficulties.has("medium")}
-                    onChange={() => toggleDifficulty("medium")}
-                    style={styles.checkbox}
-                  />
-                  Medium (4-6)
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDifficulties.has("advanced")}
-                    onChange={() => toggleDifficulty("advanced")}
-                    style={styles.checkbox}
-                  />
-                  Advanced (7-10)
-                </label>
+              <div style={styles.filterHeader}>
+                <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+                <button
+                  onClick={toggleAllDifficulties}
+                  style={styles.selectAllBtn}
+                >
+                  {selectedDifficulties.size === 10 ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+              <div style={styles.difficultyGrid}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                  <label key={level} style={styles.checkboxLabelSmall}>
+                    <input
+                      type="checkbox"
+                      checked={selectedDifficulties.has(level)}
+                      onChange={() => toggleDifficulty(level)}
+                      style={styles.checkbox}
+                    />
+                    {level}
+                  </label>
+                ))}
               </div>
             </div>
 
-            {/* Non-Mastered */}
+
+            {/* Show Mastered */}
             <div style={styles.filterGroup}>
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
-                  checked={onlyNonMastered}
-                  onChange={(e) => setOnlyNonMastered(e.target.checked)}
+                  checked={showMastered}
+                  onChange={(e) => setShowMastered(e.target.checked)}
                   style={styles.checkbox}
                 />
-                Only non-mastered words
+                Include mastered words
               </label>
             </div>
+
 
             {/* Shuffle */}
             <div style={styles.filterGroup}>
@@ -607,6 +720,7 @@ function Review({ goBack }) {
         )}
       </div>
 
+
       {/* QUESTION AREA - SCROLLABLE */}
       <div style={styles.scrollableContent}>
         <div style={styles.questionContainer}>
@@ -616,6 +730,7 @@ function Review({ goBack }) {
           <h2 style={styles.questionText}>Translate to Dutch:</h2>
           <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
         </div>
+
 
         {currentWord.example_nl && (
           <div style={styles.exampleBox}>
@@ -629,6 +744,7 @@ function Review({ goBack }) {
             )}
           </div>
         )}
+
 
         {!showAnswer ? (
           <form onSubmit={handleSubmit} style={styles.form}>
@@ -675,6 +791,7 @@ function Review({ goBack }) {
           </div>
         )}
 
+
         <div style={styles.navigationButtons}>
           <button
             onClick={previousWord}
@@ -696,13 +813,14 @@ function Review({ goBack }) {
   );
 }
 
+
 // ============================================================================
-// STYLES - MOBILE OPTIMIZED
+// STYLES - DARK THEME (MATCHING Play.jsx)
 // ============================================================================
 const styles = {
   container: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     padding: "0",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     display: "flex",
@@ -714,45 +832,61 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     padding: "20px",
+  },
+  loadingText: {
+    fontSize: "clamp(20px, 5vw, 28px)",
+    color: "white",
+    margin: "0",
+    fontWeight: "700",
+  },
+  loadingSubtext: {
+    fontSize: "clamp(14px, 3vw, 16px)",
+    color: "#bfdbfe",
+    margin: "12px 0 20px 0",
   },
   header: {
     position: "sticky",
     top: 0,
     zIndex: 100,
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    textAlign: "center",
-    paddingTop: "16px",
-    paddingBottom: "8px",
-    borderBottom: "1px solid #e5e7eb",
-  },
-  headerTop: {
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    maxWidth: "600px",
-    margin: "0 auto 12px",
-    paddingRight: "20px",
-    paddingLeft: "20px",
+    padding: "16px 20px",
+    borderBottom: "1px solid rgba(6,182,212,0.2)",
+    gap: "12px",
   },
   title: {
-    fontSize: "clamp(20px, 5vw, 32px)",
-    fontWeight: "700",
-    color: "#1e293b",
+    fontSize: "clamp(20px, 5vw, 28px)",
+    fontWeight: "800",
     margin: "0",
+    color: "white",
+    textShadow: "0 2px 8px rgba(6,182,212,0.3)",
+    flex: 1,
+  },
+  backButton: {
+    padding: "8px 12px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    background: "#06b6d4",
+    color: "#0f172a",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   progressBar: {
     height: "6px",
-    background: "#e5e7eb",
-    borderRadius: "10px",
+    background: "rgba(6,182,212,0.2)",
+    borderRadius: "8px",
     overflow: "hidden",
-    maxWidth: "400px",
-    margin: "0 auto",
-    marginRight: "20px",
-    marginLeft: "20px",
-    marginBottom: "12px",
+    margin: "12px 20px 0",
+    maxWidth: "calc(100% - 40px)",
   },
   progressFill: {
     height: "100%",
@@ -763,9 +897,7 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(2, 1fr)",
     gap: "8px",
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    paddingBottom: "12px",
+    padding: "12px 16px",
     maxWidth: "600px",
     margin: "0 auto",
     width: "100%",
@@ -773,30 +905,28 @@ const styles = {
   },
   statItem: {
     padding: "10px 12px",
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "6px",
     fontSize: "clamp(11px, 2.5vw, 13px)",
-    color: "#475569",
+    color: "#bfdbfe",
     fontWeight: "500",
     textAlign: "center",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
   },
   masteryBarContainer: {
     maxWidth: "600px",
     margin: "0 auto",
     paddingLeft: "16px",
     paddingRight: "16px",
-    paddingBottom: "16px",
+    paddingBottom: "12px",
     width: "100%",
     boxSizing: "border-box",
   },
   masteryBar: {
     height: "10px",
-    background: "#e5e7eb",
+    background: "rgba(6,182,212,0.2)",
     borderRadius: "5px",
     overflow: "hidden",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
   },
   filtersPanel: {
     paddingLeft: "16px",
@@ -810,19 +940,19 @@ const styles = {
   filterToggle: {
     width: "100%",
     padding: "10px 12px",
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(255,255,255,0.1)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "6px",
     fontSize: "clamp(12px, 2.5vw, 14px)",
     fontWeight: "600",
     cursor: "pointer",
-    color: "#475569",
+    color: "#bfdbfe",
     transition: "all 0.2s ease",
   },
   filtersContent: {
     marginTop: "8px",
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.8)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "8px",
     padding: "12px",
     display: "flex",
@@ -834,32 +964,64 @@ const styles = {
     flexDirection: "column",
     gap: "6px",
   },
+  filterHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+  },
   filterTitle: {
-    fontSize: "11px",
-    color: "#64748b",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#06b6d4",
     margin: "0",
     fontWeight: "600",
     textTransform: "uppercase",
+  },
+  selectAllBtn: {
+    padding: "4px 8px",
+    fontSize: "clamp(10px, 2vw, 11px)",
+    background: "#06b6d4",
+    color: "#0f172a",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+    whiteSpace: "nowrap",
   },
   checkboxGroup: {
     display: "flex",
     flexDirection: "column",
     gap: "4px",
   },
+  difficultyGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(5, 1fr)",
+    gap: "6px",
+  },
   checkboxLabel: {
     display: "flex",
     alignItems: "center",
     gap: "6px",
-    fontSize: "12px",
-    color: "#475569",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  checkboxLabelSmall: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    fontSize: "clamp(11px, 2vw, 12px)",
+    color: "#bfdbfe",
     cursor: "pointer",
     userSelect: "none",
   },
   checkbox: {
-    width: "16px",
-    height: "16px",
+    width: "14px",
+    height: "14px",
     cursor: "pointer",
-    accentColor: "#3b82f6",
+    accentColor: "#06b6d4",
   },
   scrollableContent: {
     flex: 1,
@@ -868,78 +1030,65 @@ const styles = {
   },
   questionContainer: {
     textAlign: "center",
-    paddingLeft: "16px",
-    paddingRight: "16px",
+    padding: "0 20px",
     paddingTop: "16px",
     marginBottom: "16px",
   },
   questionLabel: {
-    fontSize: "clamp(11px, 2.5vw, 13px)",
-    color: "#64748b",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    color: "#93c5fd",
     margin: "0 0 6px 0",
   },
   questionText: {
-    fontSize: "clamp(13px, 3vw, 16px)",
-    color: "#64748b",
-    margin: "0 0 10px 0",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
+    margin: "0 0 8px 0",
     fontWeight: "500",
   },
   wordToTranslate: {
     fontSize: "clamp(28px, 7vw, 40px)",
-    color: "#1e293b",
+    color: "white",
     margin: "0",
     fontWeight: "700",
     wordBreak: "break-word",
   },
   exampleBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "8px",
     padding: "12px",
-    maxWidth: "600px",
-    margin: "0 auto 16px",
-    marginLeft: "16px",
-    marginRight: "16px",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+    margin: "0 20px 16px",
     fontSize: "clamp(11px, 2.5vw, 12px)",
   },
   exampleNL: {
-    color: "#475569",
+    color: "#93c5fd",
     margin: "0 0 6px 0",
-    lineHeight: "1.4",
   },
   exampleEN: {
-    color: "#64748b",
+    color: "#cbd5e1",
     margin: "0",
-    lineHeight: "1.4",
+    fontSize: "clamp(10px, 2.5vw, 11px)",
   },
   form: {
     display: "flex",
     gap: "8px",
-    justifyContent: "center",
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    marginBottom: "16px",
-    flexWrap: "wrap",
-    maxWidth: "600px",
-    margin: "0 auto 16px",
-    width: "100%",
-    boxSizing: "border-box",
+    padding: "0 20px 12px",
   },
   input: {
-    padding: "12px 12px",
-    fontSize: "clamp(14px, 3vw, 16px)",
-    border: "2px solid #e5e7eb",
+    padding: "10px 12px",
+    fontSize: "clamp(13px, 3vw, 14px)",
+    border: "1px solid rgba(6,182,212,0.4)",
     borderRadius: "6px",
-    flex: "1 1 auto",
-    minWidth: "180px",
+    flex: 1,
+    minWidth: "120px",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
     transition: "all 0.2s ease",
     fontFamily: "inherit",
-    boxSizing: "border-box",
   },
   submitButton: {
-    padding: "12px 20px",
-    fontSize: "clamp(13px, 2.5vw, 14px)",
+    padding: "10px 16px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
@@ -947,35 +1096,34 @@ const styles = {
     borderRadius: "6px",
     cursor: "pointer",
     transition: "all 0.2s ease",
-    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.25)",
+    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
     whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   feedback: {
-    fontSize: "clamp(13px, 3vw, 16px)",
+    fontSize: "clamp(13px, 3vw, 14px)",
     fontWeight: "600",
-    margin: "12px 16px 0 16px",
+    margin: "12px 20px 0",
     minHeight: "24px",
     textAlign: "center",
   },
   answerDisplay: {
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "8px",
     padding: "16px",
-    maxWidth: "600px",
-    margin: "12px 16px",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+    margin: "12px 20px",
   },
   answerLabel: {
     fontSize: "clamp(11px, 2.5vw, 12px)",
-    color: "#64748b",
+    color: "#93c5fd",
     margin: "0 0 6px 0",
     fontWeight: "500",
   },
   answerText: {
     fontSize: "clamp(18px, 4vw, 22px)",
     fontWeight: "700",
-    color: "#1e293b",
+    color: "white",
     margin: "0",
   },
   primaryButton: {
@@ -987,7 +1135,7 @@ const styles = {
     border: "none",
     borderRadius: "6px",
     cursor: "pointer",
-    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.25)",
+    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
     transition: "all 0.2s ease",
     display: "block",
     margin: "16px auto",
@@ -997,9 +1145,9 @@ const styles = {
   secondaryButton: {
     padding: "10px 16px",
     fontSize: "clamp(12px, 2.5vw, 13px)",
-    background: "#f3f4f6",
-    color: "#475569",
-    border: "1px solid #e5e7eb",
+    background: "rgba(255,255,255,0.1)",
+    color: "#06b6d4",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "6px",
     cursor: "pointer",
     transition: "all 0.2s ease",
@@ -1010,16 +1158,23 @@ const styles = {
     gap: "8px",
     justifyContent: "center",
     flexWrap: "wrap",
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    paddingTop: "8px",
+    padding: "8px 16px",
   },
   emptyMessage: {
     textAlign: "center",
-    color: "#64748b",
     padding: "40px 20px",
-    fontSize: "14px",
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyMessageText: {
+    color: "#bfdbfe",
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    margin: "6px 0",
   },
 };
+
 
 export default Review;
