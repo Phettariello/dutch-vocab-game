@@ -200,7 +200,7 @@ function Play({ goBack }) {
       newScore += streakBonusThisRound;
 
       setFeedback(
-        `✅ Correct! +${wordPoints} pts${streakBonusThisRound > 0 ? ` +${streakBonusThisRound} streak` : ""}`
+        `✅ Correct!\n+${wordPoints} pts\n+${streakBonusThisRound} streak`
       );
 
       if (newStreak % 3 === 0) {
@@ -210,7 +210,7 @@ function Play({ goBack }) {
       playSound("wrong");
       newLives -= 1;
       newStreak = 0;
-      setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
+      setFeedback(`❌ Wrong!\nThe answer is '${currentWord.dutch}'.`);
     }
 
     const newUsedWords = new Set(usedWordIds);
@@ -249,10 +249,6 @@ function Play({ goBack }) {
         setGameOver(true);
       }, 2000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
-      setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel);
-      }, 2000);
-    } else if (currentIndex >= words.length - 1) {
       setTimeout(() => {
         nextLevel(newScore, newQuestionsInLevel);
       }, 2000);
@@ -403,6 +399,12 @@ function Play({ goBack }) {
     } catch (error) {
       console.error("Error saving session:", error);
     }
+  };
+
+  const handleQuitGame = async () => {
+    const finalScore = totalSessionScore + score;
+    await saveSessionAuto(finalScore, allSessionResults);
+    setGameOver(true);
   };
 
   const startNewGame = () => {
@@ -593,7 +595,7 @@ function Play({ goBack }) {
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
-            onClick={goBack}
+            onClick={handleQuitGame}
             style={styles.backButton}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "#0891b2";
@@ -664,14 +666,19 @@ function Play({ goBack }) {
       </form>
 
       {feedback && (
-        <p
-          style={{
-            ...styles.feedback,
-            color: feedback.includes("✅") ? "#10b981" : "#ef4444",
-          }}
-        >
-          {feedback}
-        </p>
+        <div style={styles.feedbackContainer}>
+          {feedback.split("\n").map((line, idx) => (
+            <p
+              key={idx}
+              style={{
+                ...styles.feedback,
+                color: feedback.includes("✅") ? "#10b981" : "#ef4444",
+              }}
+            >
+              {line}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -828,13 +835,20 @@ const styles = {
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
+  feedbackContainer: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    margin: "12px 20px 0",
+    gap: "4px",
+  },
   feedback: {
     fontSize: "clamp(13px, 3vw, 14px)",
     fontWeight: "600",
-    margin: "12px 20px 0",
-    minHeight: "24px",
+    minHeight: "20px",
     textAlign: "center",
     color: "#10b981",
+    margin: "0",
   },
   levelCompleteContainer: {
     minHeight: "100vh",
