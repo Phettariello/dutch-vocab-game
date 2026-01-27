@@ -26,7 +26,6 @@ function Play({ goBack }) {
 
   const QUESTIONS_PER_LEVEL = 10;
 
-  // Funzione per riprodurre suoni
   const playSound = (type) => {
     const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
     const volume = parseFloat(localStorage.getItem("volume")) || 70;
@@ -57,7 +56,6 @@ function Play({ goBack }) {
         osc.frequency.setValueAtTime(900, audioContext.currentTime + 0.15);
         osc.frequency.setValueAtTime(1000, audioContext.currentTime + 0.3);
       } else if (type === "levelup") {
-        // Suono level up celebrativo
         osc.frequency.setValueAtTime(523.25, audioContext.currentTime);
         osc.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1);
         osc.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2);
@@ -198,7 +196,6 @@ function Play({ goBack }) {
       newScore += wordPoints;
       newStreak += 1;
 
-      // Streak bonus: guadagna punti = numero della streak
       streakBonusThisRound = newStreak;
       newScore += streakBonusThisRound;
 
@@ -206,7 +203,6 @@ function Play({ goBack }) {
         `✅ Correct! +${wordPoints} pts${streakBonusThisRound > 0 ? ` +${streakBonusThisRound} streak` : ""}`
       );
 
-      // Play bonus sound per ogni 3 di streak
       if (newStreak % 3 === 0) {
         setTimeout(() => playSound("bonus"), 200);
       }
@@ -239,7 +235,6 @@ function Play({ goBack }) {
     const newQuestionsInLevel = questionsInLevel + 1;
     setQuestionsInLevel(newQuestionsInLevel);
 
-    // Aggiorna stats per il livello
     if (isCorrect) {
       setLevelStats((prev) => ({
         ...prev,
@@ -271,7 +266,7 @@ function Play({ goBack }) {
 
   const nextLevel = async (levelScore, totalQuestionsInLevel) => {
     const nextLevelNumber = currentLevel + 1;
-    const levelBonus = nextLevelNumber * 10; // Livello bonus
+    const levelBonus = currentLevel * 10; // FIXED: currentLevel * 10, not nextLevelNumber
 
     setLevelStats((prev) => ({
       ...prev,
@@ -310,7 +305,7 @@ function Play({ goBack }) {
       setStreak(0);
       setQuestionsInLevel(0);
       setTotalSessionScore(
-        totalSessionScore + levelStats.correctCount * (currentLevel) + levelStats.streakBonusTotal + levelStats.levelBonus
+        totalSessionScore + levelStats.correctCount * currentLevel + levelStats.streakBonusTotal + levelStats.levelBonus
       );
       setSessionResults([]);
       setLevelStats({ correctCount: 0, streakBonusTotal: 0, levelBonus: 0 });
@@ -465,16 +460,13 @@ function Play({ goBack }) {
           </div>
 
           <div style={styles.breakdownRow}>
-            <span style={styles.breakdownLabel}>Session Total</span>
+            <span style={styles.breakdownLabel}>Game Total</span>
             <span style={styles.breakdownValueSession}>{sessionTotalScore} pts</span>
           </div>
         </div>
 
-        <button
-          onClick={proceedToNextLevel}
-          style={styles.primaryButton}
-        >
-          Next Level →
+        <button onClick={proceedToNextLevel} style={styles.nextLevelButton}>
+          Next →
         </button>
       </div>
     );
@@ -488,32 +480,41 @@ function Play({ goBack }) {
         ? Math.round((correctCount / allSessionResults.length) * 100)
         : 0;
 
-    // Missed words da TUTTA la sessione
-    const missedWords = allSessionResults
+    const missedWordsMap = new Map();
+    allSessionResults
       .filter((r) => !r.correct)
-      .reduce((acc, result) => {
-        const existing = acc.find((item) => item.word === result.word);
-        if (!existing) {
-          acc.push({
+      .forEach((result) => {
+        if (!missedWordsMap.has(result.word)) {
+          missedWordsMap.set(result.word, {
             word: result.word,
             dutch: result.dutch,
-            attempts: 1,
+            attempts: 0,
+            correct: 0,
+            incorrect: 0,
           });
-        } else {
-          existing.attempts += 1;
         }
-        return acc;
-      }, [])
+        const item = missedWordsMap.get(result.word);
+        item.attempts += 1;
+        item.incorrect += 1;
+      });
+
+    allSessionResults
+      .filter((r) => r.correct)
+      .forEach((result) => {
+        if (missedWordsMap.has(result.word)) {
+          const item = missedWordsMap.get(result.word);
+          item.correct += 1;
+        }
+      });
+
+    const missedWords = Array.from(missedWordsMap.values())
       .sort((a, b) => b.attempts - a.attempts);
 
     return (
       <div style={styles.gameOverContainer}>
-        <div style={styles.header}>
+        <div style={styles.gameOverHeader}>
           <h1 style={styles.gameOverTitle}>Game Over</h1>
-          <button
-            onClick={goBack}
-            style={styles.backButtonGameOver}
-          >
+          <button onClick={goBack} style={styles.backButtonGameOver}>
             ← Menu
           </button>
         </div>
@@ -521,7 +522,7 @@ function Play({ goBack }) {
         <div style={styles.statsGrid}>
           <div style={styles.statCard}>
             <p style={styles.statValue}>{finalScore}</p>
-            <p style={styles.statLabel}>Final Score</p>
+            <p style={styles.statLabel}>Score</p>
           </div>
           <div style={styles.statCard}>
             <p style={styles.statValue}>{currentLevel}</p>
@@ -540,18 +541,35 @@ function Play({ goBack }) {
         </div>
 
         {missedWords.length > 0 && (
-          <div style={styles.missedWordsContainer}>
-            <h2 style={styles.missedWordsTitle}>📝 Words to Review</h2>
-            <div style={styles.missedWordsList}>
-              {missedWords.slice(0, 10).map((item, idx) => (
-                <div key={idx} style={styles.missedWordItem}>
-                  <span style={styles.missedWordEnglish}>{item.word}</span>
-                  <span style={styles.missedWordDutch}>{item.dutch}</span>
-                  {item.attempts > 1 && (
-                    <span style={styles.attemptsBadge}>{item.attempts}x</span>
-                  )}
-                </div>
-              ))}
+          <div style={styles.missedWordsSection}>
+            <h2 style={styles.missedWordsTitle}>📝 Missed Words</h2>
+            <div style={styles.missedWordsTable}>
+              {missedWords.slice(0, 10).map((item, idx) => {
+                const total = item.correct + item.incorrect;
+                const masteryPercent = total > 0 ? Math.round((item.correct / total) * 100) : 0;
+                
+                return (
+                  <div key={idx} style={styles.missedWordRow}>
+                    <div style={styles.missedWordLeft}>
+                      <span style={styles.missedWordEnglish}>{item.word}</span>
+                      <span style={styles.missedWordDutch}>{item.dutch}</span>
+                    </div>
+                    <span
+                      style={{
+                        ...styles.masteryBadge,
+                        backgroundColor:
+                          masteryPercent >= 60
+                            ? "#22c55e"
+                            : masteryPercent >= 30
+                            ? "#f97316"
+                            : "#ef4444",
+                      }}
+                    >
+                      {masteryPercent}%
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -561,7 +579,7 @@ function Play({ goBack }) {
             🎮 New Game
           </button>
           <button onClick={goBack} style={styles.secondaryButton}>
-            ← Back to Menu
+            ← Menu
           </button>
         </div>
       </div>
@@ -571,10 +589,21 @@ function Play({ goBack }) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>Level {currentLevel}</h1>
+        <h1 style={styles.title}>🎮 Level {currentLevel}</h1>
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
-          <button onClick={goBack} style={styles.backButton}>
+          <button
+            onClick={goBack}
+            style={styles.backButton}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#0891b2";
+              e.currentTarget.style.transform = "scale(1.05)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#06b6d4";
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
             ← Menu
           </button>
         </div>
@@ -651,24 +680,30 @@ function Play({ goBack }) {
 const styles = {
   container: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    padding: "16px",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    padding: "0",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     display: "flex",
     flexDirection: "column",
   },
   header: {
+    position: "sticky",
+    top: 0,
+    zIndex: 100,
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: "12px",
+    padding: "16px 20px",
+    borderBottom: "1px solid rgba(6,182,212,0.2)",
     gap: "12px",
   },
   title: {
     fontSize: "clamp(20px, 5vw, 28px)",
-    fontWeight: "700",
-    color: "#1e293b",
+    fontWeight: "800",
     margin: "0",
+    color: "white",
+    textShadow: "0 2px 8px rgba(6,182,212,0.3)",
     flex: 1,
   },
   headerRight: {
@@ -686,10 +721,10 @@ const styles = {
     display: "inline-block",
   },
   backButton: {
-    padding: "6px 12px",
-    fontSize: "clamp(11px, 2.5vw, 13px)",
+    padding: "8px 12px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
     background: "#06b6d4",
-    color: "white",
+    color: "#0f172a",
     border: "none",
     borderRadius: "6px",
     cursor: "pointer",
@@ -700,10 +735,11 @@ const styles = {
   },
   progressBar: {
     height: "6px",
-    background: "#e5e7eb",
+    background: "rgba(6,182,212,0.2)",
     borderRadius: "8px",
     overflow: "hidden",
-    marginBottom: "12px",
+    margin: "12px 20px 0",
+    maxWidth: "calc(100% - 40px)",
   },
   progressFill: {
     height: "100%",
@@ -713,71 +749,73 @@ const styles = {
   stats: {
     display: "flex",
     justifyContent: "center",
-    gap: "24px",
-    marginBottom: "16px",
+    gap: "32px",
+    padding: "16px 20px",
     fontSize: "clamp(12px, 3vw, 14px)",
   },
   statItem: {
-    color: "#475569",
+    color: "#bfdbfe",
     fontWeight: "600",
   },
   questionContainer: {
     textAlign: "center",
+    padding: "0 20px",
     marginBottom: "16px",
   },
   questionLabel: {
     fontSize: "clamp(11px, 2.5vw, 12px)",
-    color: "#64748b",
+    color: "#93c5fd",
     margin: "0 0 6px 0",
   },
   questionText: {
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    color: "#64748b",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    color: "#bfdbfe",
     margin: "0 0 8px 0",
     fontWeight: "500",
   },
   wordToTranslate: {
-    fontSize: "clamp(24px, 6vw, 36px)",
-    color: "#1e293b",
+    fontSize: "clamp(28px, 7vw, 40px)",
+    color: "white",
     margin: "0",
     fontWeight: "700",
     wordBreak: "break-word",
   },
   exampleBox: {
-    background: "white",
-    border: "1px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "8px",
     padding: "12px",
-    marginBottom: "16px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-    fontSize: "clamp(11px, 2.5vw, 13px)",
+    margin: "0 20px 16px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
   },
   exampleNL: {
-    color: "#475569",
+    color: "#93c5fd",
     margin: "0 0 6px 0",
   },
   exampleEN: {
-    color: "#64748b",
+    color: "#cbd5e1",
     margin: "0",
-    fontSize: "clamp(10px, 2.5vw, 12px)",
+    fontSize: "clamp(10px, 2.5vw, 11px)",
   },
   form: {
     display: "flex",
-    gap: "6px",
-    marginBottom: "12px",
+    gap: "8px",
+    padding: "0 20px 12px",
   },
   input: {
-    padding: "8px 10px",
+    padding: "10px 12px",
     fontSize: "clamp(13px, 3vw, 14px)",
-    border: "1px solid #e5e7eb",
+    border: "1px solid rgba(6,182,212,0.4)",
     borderRadius: "6px",
     flex: 1,
     minWidth: "120px",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
     transition: "all 0.2s ease",
     fontFamily: "inherit",
   },
   submitButton: {
-    padding: "8px 16px",
+    padding: "10px 16px",
     fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
@@ -791,16 +829,16 @@ const styles = {
     flexShrink: 0,
   },
   feedback: {
-    fontSize: "clamp(13px, 3vw, 15px)",
+    fontSize: "clamp(13px, 3vw, 14px)",
     fontWeight: "600",
-    margin: "12px 0",
+    margin: "12px 20px 0",
     minHeight: "24px",
     textAlign: "center",
+    color: "#10b981",
   },
-  // Level Complete Screen
   levelCompleteContainer: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -810,155 +848,52 @@ const styles = {
   },
   levelCompleteTitle: {
     fontSize: "clamp(28px, 6vw, 40px)",
-    color: "#1e293b",
+    color: "white",
     margin: "0 0 20px 0",
     textAlign: "center",
   },
   breakdownContainer: {
-    background: "white",
-    border: "2px solid #e5e7eb",
+    background: "rgba(30, 58, 138, 0.8)",
+    border: "1px solid rgba(6,182,212,0.2)",
     borderRadius: "12px",
     padding: "16px",
-    maxWidth: "400px",
+    maxWidth: "360px",
     marginBottom: "20px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
   },
   breakdownRow: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "8px 0",
-    fontSize: "clamp(13px, 2.5vw, 14px)",
+    padding: "10px 0",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "500",
   },
   breakdownLabel: {
-    color: "#475569",
+    color: "#bfdbfe",
   },
   breakdownValue: {
-    color: "#1e293b",
+    color: "#f0f9ff",
     fontWeight: "600",
   },
   breakdownValueTotal: {
-    color: "#059669",
+    color: "#22c55e",
     fontWeight: "700",
-    fontSize: "clamp(14px, 3vw, 16px)",
+    fontSize: "clamp(13px, 3vw, 14px)",
   },
   breakdownValueSession: {
-    color: "#3b82f6",
+    color: "#fbbf24",
     fontWeight: "700",
-    fontSize: "clamp(14px, 3vw, 16px)",
+    fontSize: "clamp(13px, 3vw, 14px)",
   },
   breakdownDivider: {
     height: "1px",
-    background: "#e5e7eb",
+    background: "rgba(6,182,212,0.2)",
     margin: "8px 0",
   },
-  // Game Over Screen
-  gameOverContainer: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
-    display: "flex",
-    flexDirection: "column",
-    padding: "16px",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-  gameOverTitle: {
-    fontSize: "clamp(24px, 6vw, 36px)",
-    color: "#1e293b",
-    margin: "0",
-    textAlign: "center",
-  },
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
-    gap: "12px",
-    maxWidth: "500px",
-    margin: "20px auto",
-    width: "100%",
-  },
-  statCard: {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    borderRadius: "10px",
-    padding: "12px",
-    textAlign: "center",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
-  },
-  statValue: {
-    fontSize: "clamp(20px, 4vw, 28px)",
-    fontWeight: "700",
-    color: "#1e293b",
-    margin: "0 0 4px 0",
-  },
-  statLabel: {
-    fontSize: "clamp(11px, 2vw, 12px)",
-    color: "#64748b",
-    margin: "0",
-    fontWeight: "600",
-  },
-  missedWordsContainer: {
-    background: "white",
-    border: "1px solid #fca5a5",
-    borderRadius: "10px",
-    padding: "14px",
-    marginBottom: "16px",
-    maxWidth: "500px",
-    margin: "0 auto 16px",
-    width: "100%",
-  },
-  missedWordsTitle: {
+  nextLevelButton: {
+    padding: "12px 24px",
     fontSize: "clamp(13px, 2.5vw, 14px)",
-    color: "#991b1b",
-    margin: "0 0 12px 0",
-    fontWeight: "600",
-  },
-  missedWordsList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-  },
-  missedWordItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-    padding: "8px",
-    background: "#fef2f2",
-    borderRadius: "6px",
-    gap: "8px",
-  },
-  missedWordEnglish: {
-    fontWeight: "600",
-    color: "#1e293b",
-    minWidth: "80px",
-  },
-  missedWordDutch: {
-    color: "#64748b",
-    flex: 1,
-    textAlign: "right",
-  },
-  attemptsBadge: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    padding: "2px 6px",
-    borderRadius: "4px",
-    fontWeight: "600",
-    fontSize: "clamp(10px, 2vw, 11px)",
-    minWidth: "28px",
-    textAlign: "center",
-  },
-  buttonContainer: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    maxWidth: "500px",
-    margin: "0 auto",
-    width: "100%",
-  },
-  primaryButton: {
-    padding: "10px 20px",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
@@ -967,33 +902,166 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
     transition: "all 0.2s ease",
-    flex: "1 1 150px",
-    minWidth: "120px",
+    whiteSpace: "nowrap",
   },
-  secondaryButton: {
-    padding: "10px 20px",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
-    fontWeight: "600",
-    background: "#f3f4f6",
-    color: "#475569",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    flex: "1 1 150px",
-    minWidth: "120px",
+  gameOverContainer: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    display: "flex",
+    flexDirection: "column",
+    padding: "16px",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    overflowY: "auto",
+  },
+  gameOverHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "16px",
+    gap: "12px",
+  },
+  gameOverTitle: {
+    fontSize: "clamp(24px, 6vw, 36px)",
+    color: "white",
+    margin: "0",
+    flex: 1,
   },
   backButtonGameOver: {
-    padding: "8px 14px",
+    padding: "8px 12px",
     fontSize: "clamp(11px, 2.5vw, 12px)",
     background: "#06b6d4",
-    color: "white",
+    color: "#0f172a",
     border: "none",
     borderRadius: "6px",
     cursor: "pointer",
     fontWeight: "600",
     transition: "all 0.2s ease",
     whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "12px",
+    maxWidth: "400px",
+    margin: "0 auto 16px",
+    width: "100%",
+  },
+  statCard: {
+    background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
+    border: "1px solid rgba(6,182,212,0.2)",
+    borderRadius: "10px",
+    padding: "14px",
+    textAlign: "center",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+  },
+  statValue: {
+    fontSize: "clamp(20px, 4vw, 28px)",
+    fontWeight: "700",
+    color: "#fbbf24",
+    margin: "0 0 4px 0",
+  },
+  statLabel: {
+    fontSize: "clamp(10px, 2vw, 11px)",
+    color: "#bfdbfe",
+    margin: "0",
+    textTransform: "uppercase",
+    fontWeight: "600",
+  },
+  missedWordsSection: {
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(239, 68, 68, 0.3)",
+    borderRadius: "10px",
+    padding: "14px",
+    marginBottom: "16px",
+    maxWidth: "450px",
+    margin: "0 auto 16px",
+    width: "100%",
+  },
+  missedWordsTitle: {
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    color: "#fca5a5",
+    margin: "0 0 12px 0",
+    fontWeight: "600",
+  },
+  missedWordsTable: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  missedWordRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    padding: "10px",
+    background: "rgba(30, 58, 138, 0.8)",
+    borderRadius: "6px",
+    gap: "8px",
+    border: "1px solid rgba(6,182,212,0.2)",
+  },
+  missedWordLeft: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    gap: "2px",
+  },
+  missedWordEnglish: {
+    fontWeight: "600",
+    color: "white",
+  },
+  missedWordDutch: {
+    color: "#93c5fd",
+    fontSize: "clamp(10px, 2.5vw, 11px)",
+  },
+  masteryBadge: {
+    padding: "4px 8px",
+    borderRadius: "4px",
+    fontSize: "clamp(10px, 2vw, 11px)",
+    fontWeight: "bold",
+    color: "white",
+    minWidth: "40px",
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  buttonContainer: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    maxWidth: "450px",
+    margin: "0 auto",
+    width: "100%",
+  },
+  primaryButton: {
+    padding: "12px 20px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
+    transition: "all 0.2s ease",
+    flex: "1 1 140px",
+    minWidth: "120px",
+  },
+  secondaryButton: {
+    padding: "12px 20px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    fontWeight: "600",
+    background: "rgba(255,255,255,0.1)",
+    color: "#06b6d4",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    flex: "1 1 140px",
+    minWidth: "120px",
   },
   loadingContainer: {
     minHeight: "100vh",
@@ -1001,13 +1069,13 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     padding: "20px",
   },
   loadingText: {
     fontSize: "clamp(20px, 5vw, 28px)",
-    color: "#1e293b",
+    color: "white",
     margin: "0",
   },
 };
