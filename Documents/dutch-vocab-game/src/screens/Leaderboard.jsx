@@ -424,18 +424,18 @@ function Leaderboard({ onUserClick, goBack }) {
     },
     tabsContainerRow1: {
       display: "grid",
-      gridTemplateColumns: "repeat(3, 1fr)",
-      gap: "8px",
-      marginBottom: "12px",
-      maxWidth: "600px",
-      margin: "0 auto 12px auto",
-    },
-    tabsContainerRow2: {
-      display: "grid",
       gridTemplateColumns: "repeat(4, 1fr)",
       gap: "8px",
       marginBottom: "20px",
-      maxWidth: "700px",
+      maxWidth: "800px",
+      margin: "0 auto 20px auto",
+    },
+    tabsContainerRow2: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: "8px",
+      marginBottom: "20px",
+      maxWidth: "600px",
       margin: "0 auto 20px auto",
     },
     tab: (isActive) => ({
@@ -507,10 +507,11 @@ function Leaderboard({ onUserClick, goBack }) {
       boxShadow: "0 4px 12px rgba(6,182,212,0.2)",
     },
     rank: {
-      fontSize: "clamp(16px, 3vw, 20px)",
+      fontSize: "clamp(14px, 2.5vw, 16px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      minWidth: "35px",
+      minWidth: "24px",
+      textAlign: "center",
     },
     levelBadge: {
       display: "inline-flex",
@@ -540,6 +541,12 @@ function Leaderboard({ onUserClick, goBack }) {
       fontWeight: "bold",
       color: "#fbbf24",
     },
+    medalValue: {
+      fontSize: "clamp(11px, 2.3vw, 12px)",
+      fontWeight: "bold",
+      color: "#fbbf24",
+      textAlign: "center",
+    },
     emptyState: {
       textAlign: "center",
       color: "#06b6d4",
@@ -558,12 +565,12 @@ function Leaderboard({ onUserClick, goBack }) {
   // ============================================================================
   // RENDER: Header + Rows per tab type
   // ============================================================================
-  const renderScoresTable = (headerColumns) => {
+  const renderScoresTable = (headerColumns, gridTemplate) => {
     return (
       <>
         <div style={{
           ...styles.tableHeader,
-          gridTemplateColumns: headerColumns.map(() => "1fr").join(" "),
+          gridTemplateColumns: gridTemplate,
         }}>
           {headerColumns.map((col) => (
             <div key={col}>{col}</div>
@@ -584,7 +591,7 @@ function Leaderboard({ onUserClick, goBack }) {
               key={index}
               style={{
                 ...styles.tableRow,
-                gridTemplateColumns: headerColumns.map(() => "1fr").join(" "),
+                gridTemplateColumns: gridTemplate,
               }}
               onMouseEnter={(e) => {
                 Object.assign(e.currentTarget.style, styles.rowHover);
@@ -606,14 +613,12 @@ function Leaderboard({ onUserClick, goBack }) {
                 {username}
               </h3>
               {activeTab === "words" && (
-                <div style={styles.statValue}>{entry.wordsMastered} 📚</div>
+                <div style={styles.statValue}>{entry.wordsMastered}</div>
               )}
               {activeTab !== "words" && (
                 <>
-                  <div style={styles.statValue}>{masteredCount} 📚</div>
-                  <div style={styles.statValue}>
-                    {displayScore?.toLocaleString()} ⭐
-                  </div>
+                  <div style={styles.statValue}>{masteredCount}</div>
+                  <div style={styles.statValue}>{displayScore?.toLocaleString()}</div>
                 </>
               )}
             </div>
@@ -625,16 +630,16 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   const renderMedalsTable = () => {
-    const headerColumns = ["Rank", "Player", "🥇", "🥈", "🥉", "Score"];
+    const headerColumns = ["", "Player", "🥇", "🥈", "🥉", "Score"];
     
     return (
       <>
         <div style={{
           ...styles.tableHeader,
-          gridTemplateColumns: "35px 1fr 50px 50px 50px 70px",
+          gridTemplateColumns: "24px 1fr 40px 40px 40px 60px",
         }}>
           {headerColumns.map((col) => (
-            <div key={col}>{col}</div>
+            <div key={col} style={col !== "" && col !== "Player" ? { textAlign: "center" } : {}}>{col}</div>
           ))}
         </div>
 
@@ -643,7 +648,7 @@ function Leaderboard({ onUserClick, goBack }) {
             key={entry.user_id}
             style={{
               ...styles.tableRow,
-              gridTemplateColumns: "35px 1fr 50px 50px 50px 70px",
+              gridTemplateColumns: "24px 1fr 40px 40px 40px 60px",
             }}
             onMouseEnter={(e) => {
               Object.assign(e.currentTarget.style, styles.rowHover);
@@ -653,7 +658,7 @@ function Leaderboard({ onUserClick, goBack }) {
               e.currentTarget.style.boxShadow = "none";
             }}
           >
-            <div style={styles.rank}>{getMedalEmoji(index)}</div>
+            <div style={{...styles.rank, minWidth: "24px"}}>{getMedalEmoji(index)}</div>
             <h3
               style={styles.username}
               onClick={(e) => {
@@ -663,16 +668,16 @@ function Leaderboard({ onUserClick, goBack }) {
             >
               {entry.username}
             </h3>
-            <div style={{...styles.statValue, textAlign: "center"}}>
+            <div style={styles.medalValue}>
               {entry.gold > 0 ? entry.gold : "—"}
             </div>
-            <div style={{...styles.statValue, textAlign: "center"}}>
+            <div style={styles.medalValue}>
               {entry.silver > 0 ? entry.silver : "—"}
             </div>
-            <div style={{...styles.statValue, textAlign: "center"}}>
+            <div style={styles.medalValue}>
               {entry.bronze > 0 ? entry.bronze : "—"}
             </div>
-            <div style={{...styles.statValue, textAlign: "center"}}>
+            <div style={{...styles.medalValue, textAlign: "right"}}>
               {entry.totalScore}
             </div>
           </div>
@@ -723,7 +728,7 @@ function Leaderboard({ onUserClick, goBack }) {
         )}
 
 
-        {/* ROW 1: Today, Week, Month */}
+        {/* TABS ROW 1: Today, Week, Month, Medals */}
         <div style={styles.tabsContainerRow1}>
           <button
             style={styles.tab(activeTab === "today")}
@@ -743,29 +748,6 @@ function Leaderboard({ onUserClick, goBack }) {
           >
             📆 Month
           </button>
-        </div>
-
-
-        {/* ROW 2: All Time, Best, Words, Medals */}
-        <div style={styles.tabsContainerRow2}>
-          <button
-            style={styles.tab(activeTab === "allTime")}
-            onClick={() => setActiveTab("allTime")}
-          >
-            ⭐ All Time
-          </button>
-          <button
-            style={styles.tab(activeTab === "bestScore")}
-            onClick={() => setActiveTab("bestScore")}
-          >
-            ⚡ Best
-          </button>
-          <button
-            style={styles.tab(activeTab === "words")}
-            onClick={() => setActiveTab("words")}
-          >
-            📚 Words
-          </button>
           <button
             style={styles.tab(activeTab === "medals")}
             onClick={() => setActiveTab("medals")}
@@ -773,6 +755,31 @@ function Leaderboard({ onUserClick, goBack }) {
             🏅 Medals
           </button>
         </div>
+
+
+        {/* TABS ROW 2: All Time, Best, Words */}
+        {activeTab !== "medals" && (
+          <div style={styles.tabsContainerRow2}>
+            <button
+              style={styles.tab(activeTab === "allTime")}
+              onClick={() => setActiveTab("allTime")}
+            >
+              ⭐ All Time
+            </button>
+            <button
+              style={styles.tab(activeTab === "bestScore")}
+              onClick={() => setActiveTab("bestScore")}
+            >
+              ⚡ Best
+            </button>
+            <button
+              style={styles.tab(activeTab === "words")}
+              onClick={() => setActiveTab("words")}
+            >
+              📚 Words
+            </button>
+          </div>
+        )}
 
 
         {/* MEDALS SUB-TABS */}
@@ -818,9 +825,9 @@ function Leaderboard({ onUserClick, goBack }) {
             No scores yet. Be the first to play! 🎮
           </div>
         ) : activeTab === "words" ? (
-          renderScoresTable(["", "", "Player", "Words"])
+          renderScoresTable(["", "", "Player", "Words"], "24px 40px 1fr 60px")
         ) : (
-          renderScoresTable(["", "", "Player", "Words", "Score"])
+          renderScoresTable(["", "", "Player", "Words", "Score"], "24px 40px 1fr 60px 80px")
         )}
       </div>
     </div>
