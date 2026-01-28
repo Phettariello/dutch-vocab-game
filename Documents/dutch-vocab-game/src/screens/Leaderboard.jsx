@@ -119,6 +119,8 @@ function Leaderboard({ onUserClick, goBack }) {
             sessionsPlayed: 0,
             bestLevel: 0,
             highestScore: 0,
+            bestScoreCorrectAnswers: 0,
+            bestScoreLevelReached: 0,
           };
         }
         userStats[userId].totalScore += session.score;
@@ -127,10 +129,13 @@ function Leaderboard({ onUserClick, goBack }) {
           userStats[userId].bestLevel,
           session.level || 0
         );
-        userStats[userId].highestScore = Math.max(
-          userStats[userId].highestScore,
-          session.score
-        );
+        
+        // Track best score session details
+        if (session.score > userStats[userId].highestScore) {
+          userStats[userId].highestScore = session.score;
+          userStats[userId].bestScoreCorrectAnswers = session.correct_answers || 0;
+          userStats[userId].bestScoreLevelReached = session.level || 0;
+        }
       });
 
       let leaderboardData = Object.values(userStats);
@@ -186,12 +191,6 @@ function Leaderboard({ onUserClick, goBack }) {
         .from("user_progress")
         .select("user_id, mastered");
 
-      const { data: wordsData } = await supabase
-        .from("words")
-        .select("id");
-
-      const totalWords = wordsData?.length || 0;
-
       const wordsCounts = {};
       progressData?.forEach((progress) => {
         if (!wordsCounts[progress.user_id]) {
@@ -202,10 +201,19 @@ function Leaderboard({ onUserClick, goBack }) {
         }
       });
 
-      let leaderboardData = Object.entries(wordsCounts).map(([userId, masteredCount]) => ({
+      // Count total words per user (not all words in database)
+      const totalWordsByUser = {};
+      progressData?.forEach((progress) => {
+        if (!totalWordsByUser[progress.user_id]) {
+          totalWordsByUser[progress.user_id] = 0;
+        }
+        totalWordsByUser[progress.user_id]++;
+      });
+
+      let leaderboardData = Object.keys(wordsCounts).map((userId) => ({
         user_id: userId,
-        wordsMastered: masteredCount,
-        totalWords: totalWords,
+        wordsMastered: wordsCounts[userId] || 0,
+        totalWords: totalWordsByUser[userId] || 0,
       }));
 
       leaderboardData.sort((a, b) => b.wordsMastered - a.wordsMastered);
@@ -538,8 +546,8 @@ function Leaderboard({ onUserClick, goBack }) {
               )}
               {activeTab === "bestScore" && (
                 <>
-                  <div style={styles.statValue}>{entry.maxCorrectAnswers || "—"}</div>
-                  <div style={styles.statValue}>{entry.bestLevel || "—"}</div>
+                  <div style={styles.statValue}>{entry.bestScoreCorrectAnswers || 0}</div>
+                  <div style={styles.statValue}>{entry.bestScoreLevelReached || 0}</div>
                   <div style={styles.statValue}>{displayScore?.toLocaleString()}</div>
                 </>
               )}
