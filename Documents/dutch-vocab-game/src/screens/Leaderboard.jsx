@@ -6,7 +6,6 @@ function Leaderboard({ onUserClick, goBack }) {
   const [activeTab, setActiveTab] = useState("allTime");
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [medals, setMedals] = useState({});
   const [usernames, setUsernames] = useState({});
   const [userLevels, setUserLevels] = useState({});
   const [userMasteredCounts, setUserMasteredCounts] = useState({});
@@ -24,9 +23,6 @@ function Leaderboard({ onUserClick, goBack }) {
       fetchWordsLeaderboard();
     } else {
       fetchLeaderboard();
-      fetchMedals();
-      fetchUserLevels();
-      fetchUserMasteredCounts();
     }
   }, [activeTab, medalType]);
 
@@ -54,80 +50,171 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // FUNCTION: Fetch user mastered word counts
+  // FUNCTION: Get date range start
   // ============================================================================
-  const fetchUserMasteredCounts = async () => {
-    try {
-      const { data: progressData } = await supabase
-        .from("user_progress")
-        .select("user_id, mastered");
+  const getTodayStart = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}T00:00:00+00:00`;
+  };
 
-      const masteredCounts = {};
-      progressData?.forEach((progress) => {
-        if (!masteredCounts[progress.user_id]) {
-          masteredCounts[progress.user_id] = 0;
-        }
-        if (progress.mastered) {
-          masteredCounts[progress.user_id]++;
-        }
-      });
+  const getWeekStart = () => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStartDate = new Date(now);
+    weekStartDate.setDate(now.getDate() - daysToSubtract);
+    
+    const year = weekStartDate.getFullYear();
+    const month = String(weekStartDate.getMonth() + 1).padStart(2, '0');
+    const day = String(weekStartDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}T00:00:00+00:00`;
+  };
 
-      setUserMasteredCounts(masteredCounts);
-    } catch (error) {
-      console.error("Error fetching mastered counts:", error);
+  const getMonthStart = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}-01T00:00:00+00:00`;
+  };
+
+
+  // ============================================================================
+  // FUNCTION: Award medals to top 3 users
+  // ============================================================================
+  const awardMedals = async (table, topUsers) => {
+    if (topUsers.length === 0) return;
+
+    const medals = [
+      { user_id: topUsers[0]?.user_id, medal_type: "gold" },
+      { user_id: topUsers[1]?.user_id, medal_type: "silver" },
+      { user_id: topUsers[2]?.user_id, medal_type: "bronze" },
+    ].filter((m) => m.user_id);
+
+    for (const medal of medals) {
+      const { data: existing } = await supabase
+        .from(table)
+        .select("id")
+        .eq("user_id", medal.user_id)
+        .eq("medal_type", medal.medal_type)
+        .single();
+
+      if (!existing) {
+        await supabase.from(table).insert({
+          user_id: medal.user_id,
+          medal_type: medal.medal_type,
+          awarded_at: new Date().toISOString(),
+        });
+      }
     }
   };
 
 
   // ============================================================================
-  // FUNCTION: Fetch user levels
+  // FUNCTION: Fetch leaderboard data (scores)
   // ============================================================================
-  const fetchUserLevels = async () => {
+  const fetchLeaderboard = async () => {
+    setLoading(true);
     try {
+      let query = supabase.from("sessions").select("*");
+
+      if (activeTab === "today") {
+        const todayStart = getTodayStart();
+        query = query.gte("created_at", todayStart);
+      } else if (activeTab === "thisWeek") {
+        const weekStart = getWeekStart();
+        query = query.gte("created_at", weekStart);
+      } else if (activeTab === "thisMonth") {
+        const monthStart = getMonthStart();
+        query = query.gte("created_at", monthStart);
+      }
+
+      const { data } = await query.order("score", { ascending: false });
+
+      const userStats = {};
+      data?.forEach((session) => {
+        const userId = session.user_id;
+        if (!userStats[userId]) {
+          userStats[userId] = {
+            user_id: userId,
+            totalScore: 0,
+            sessionsPlayed: 0,
+            bestLevel: 0,
+            highestScore: 0,
+          };
+        }
+        userStats[userId].totalScore += session.score;
+        userStats[userId].sessionsPlayed += 1;
+        userStats[userId].bestLevel = Math.max(
+          userStats[userId].bestLevel,
+          session.level || 0
+        );
+        userStats[userId].highestScore = Math.max(
+          userStats[userId].highestScore,
+          session.score
+        );
+      });
+
+      let leaderboardData = Object.values(userStats);
+
+      if (activeTab === "bestScore") {
+        leaderboardData.sort((a, b) => b.highestScore - a.highestScore);
+      } else {
+        leaderboardData.sort((a, b) => b.totalScore - a.totalScore);
+      }
+
+      // Award medals for today/week/month
+      if (activeTab === "today") {
+        const topToday = leaderboardData.slice(0, 3);
+        await awardMedals("daily_medals", topToday);
+      } else if (activeTab === "thisWeek") {
+        const topWeek = leaderboardData.slice(0, 3);
+        await awardMedals("weekly_medals", topWeek);
+      } else if (activeTab === "thisMonth") {
+        const topMonth = leaderboardData.slice(0, 3);
+        await awardMedals("monthly_medals", topMonth);
+      }
+
+      leaderboardData = leaderboardData.slice(0, 10);
+
+      const userIds = leaderboardData.map((entry) => entry.user_id);
+      const { data: profilesData } = await supabase
+        .from("profiles")
+        .select("user_id, username")
+        .in("user_id", userIds);
+
+      const usernamesMap = {};
+      const levelsMap = {};
+      const masteredMap = {};
+
+      profilesData?.forEach((profile) => {
+        usernamesMap[profile.user_id] = profile.username;
+      });
+
+      // Fetch mastered counts
       const { data: progressData } = await supabase
         .from("user_progress")
-        .select("user_id, mastered");
-
-      const levelMap = {};
-      const userIds = [...new Set(progressData?.map((p) => p.user_id) || [])];
+        .select("user_id, mastered")
+        .in("user_id", userIds);
 
       userIds.forEach((userId) => {
-        const wordsMastered = progressData?.filter(
+        const masteredCount = progressData?.filter(
           (p) => p.user_id === userId && p.mastered
         ).length || 0;
-        levelMap[userId] = calculateLevel(wordsMastered);
+        masteredMap[userId] = masteredCount;
+        levelsMap[userId] = calculateLevel(masteredCount);
       });
 
-      setUserLevels(levelMap);
+      setUsernames(usernamesMap);
+      setUserLevels(levelsMap);
+      setUserMasteredCounts(masteredMap);
+      setLeaderboard(leaderboardData);
     } catch (error) {
-      console.error("Error fetching user levels:", error);
-    }
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Fetch medals (weekly + monthly)
-  // ============================================================================
-  const fetchMedals = async () => {
-    try {
-      const { data: weeklyMedals } = await supabase
-        .from("weekly_medals")
-        .select("user_id, medal_type");
-
-      const { data: monthlyMedals } = await supabase
-        .from("monthly_medals")
-        .select("user_id, medal_type");
-
-      const medalCounts = {};
-      [...(weeklyMedals || []), ...(monthlyMedals || [])].forEach((medal) => {
-        if (!medalCounts[medal.user_id]) {
-          medalCounts[medal.user_id] = { gold: 0, silver: 0, bronze: 0 };
-        }
-        medalCounts[medal.user_id][medal.medal_type]++;
-      });
-      setMedals(medalCounts);
-    } catch (error) {
-      console.error("Error fetching medals:", error);
+      console.error("Error fetching leaderboard:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -167,11 +254,21 @@ function Leaderboard({ onUserClick, goBack }) {
         .in("user_id", userIds);
 
       const usernamesMap = {};
+      const levelsMap = {};
+
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
-      setUsernames(usernamesMap);
 
+      userIds.forEach((userId) => {
+        const masteredCount = leaderboardData.find(
+          (l) => l.user_id === userId
+        )?.wordsMastered || 0;
+        levelsMap[userId] = calculateLevel(masteredCount);
+      });
+
+      setUsernames(usernamesMap);
+      setUserLevels(levelsMap);
       setLeaderboard(leaderboardData);
     } catch (error) {
       console.error("Error fetching words leaderboard:", error);
@@ -231,122 +328,6 @@ function Leaderboard({ onUserClick, goBack }) {
       setMedalLeaderboard(combined);
     } catch (error) {
       console.error("Error fetching medal leaderboard:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Get today start
-  // ============================================================================
-  const getTodayStart = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}T00:00:00+00:00`;
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Get week start (Monday 00:00 CET)
-  // ============================================================================
-  const getWeekStart = () => {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const weekStartDate = new Date(now);
-    weekStartDate.setDate(now.getDate() - daysToSubtract);
-    
-    const year = weekStartDate.getFullYear();
-    const month = String(weekStartDate.getMonth() + 1).padStart(2, '0');
-    const day = String(weekStartDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}T00:00:00+00:00`;
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Get month start
-  // ============================================================================
-  const getMonthStart = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    return `${year}-${month}-01T00:00:00+00:00`;
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Fetch leaderboard data (scores)
-  // ============================================================================
-  const fetchLeaderboard = async () => {
-    setLoading(true);
-    try {
-      let query = supabase.from("sessions").select("*");
-
-      if (activeTab === "today") {
-        const todayStart = getTodayStart();
-        query = query.gte("created_at", todayStart);
-      } else if (activeTab === "thisWeek") {
-        const weekStart = getWeekStart();
-        query = query.gte("created_at", weekStart);
-      } else if (activeTab === "thisMonth") {
-        const monthStart = getMonthStart();
-        query = query.gte("created_at", monthStart);
-      }
-
-      const { data } = await query.order("score", { ascending: false });
-
-      const userStats = {};
-      data?.forEach((session) => {
-        const userId = session.user_id;
-        if (!userStats[userId]) {
-          userStats[userId] = {
-            user_id: userId,
-            totalScore: 0,
-            sessionsPlayed: 0,
-            bestLevel: 0,
-            highestScore: 0,
-          };
-        }
-        userStats[userId].totalScore += session.score;
-        userStats[userId].sessionsPlayed += 1;
-        userStats[userId].bestLevel = Math.max(
-          userStats[userId].bestLevel,
-          session.level || 0
-        );
-        userStats[userId].highestScore = Math.max(
-          userStats[userId].highestScore,
-          session.score
-        );
-      });
-
-      let leaderboardData = Object.values(userStats);
-
-      if (activeTab === "bestScore") {
-        leaderboardData.sort((a, b) => b.highestScore - a.highestScore);
-      } else {
-        leaderboardData.sort((a, b) => b.totalScore - a.totalScore);
-      }
-
-      leaderboardData = leaderboardData.slice(0, 10);
-
-      const userIds = leaderboardData.map((entry) => entry.user_id);
-      const { data: profilesData } = await supabase
-        .from("profiles")
-        .select("user_id, username")
-        .in("user_id", userIds);
-
-      const usernamesMap = {};
-      profilesData?.forEach((profile) => {
-        usernamesMap[profile.user_id] = profile.username;
-      });
-      setUsernames(usernamesMap);
-
-      setLeaderboard(leaderboardData);
-    } catch (error) {
-      console.error("Error fetching leaderboard:", error);
     } finally {
       setLoading(false);
     }
@@ -510,7 +491,7 @@ function Leaderboard({ onUserClick, goBack }) {
       fontSize: "clamp(14px, 2.5vw, 16px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      minWidth: "24px",
+      minWidth: "20px",
       textAlign: "center",
     },
     levelBadge: {
@@ -518,12 +499,12 @@ function Leaderboard({ onUserClick, goBack }) {
       alignItems: "center",
       justifyContent: "center",
       background: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
-      borderRadius: "6px",
-      padding: "4px 10px",
-      fontSize: "clamp(10px, 2vw, 11px)",
+      borderRadius: "4px",
+      padding: "3px 8px",
+      fontSize: "clamp(9px, 1.8vw, 10px)",
       fontWeight: "700",
       color: "#0f172a",
-      minWidth: "36px",
+      minWidth: "30px",
       textAlign: "center",
       boxShadow: "0 2px 6px rgba(251, 191, 36, 0.3)",
     },
@@ -563,7 +544,7 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // RENDER: Header + Rows per tab type
+  // RENDER: Scores Table
   // ============================================================================
   const renderScoresTable = (headerColumns, gridTemplate) => {
     return (
@@ -582,7 +563,8 @@ function Leaderboard({ onUserClick, goBack }) {
             usernames[entry.user_id] ||
             `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
           const userLevel = userLevels[entry.user_id] || "A0";
-          const masteredCount = userMasteredCounts[entry.user_id] || 0;
+          const masteredCount = userMasteredCounts[entry.user_id] || 
+            (activeTab === "words" ? entry.wordsMastered : 0);
           const displayScore =
             activeTab === "bestScore" ? entry.highestScore : entry.totalScore;
 
@@ -629,6 +611,9 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+  // ============================================================================
+  // RENDER: Medals Table
+  // ============================================================================
   const renderMedalsTable = () => {
     const headerColumns = ["", "Player", "🥇", "🥈", "🥉", "Score"];
     
@@ -636,7 +621,7 @@ function Leaderboard({ onUserClick, goBack }) {
       <>
         <div style={{
           ...styles.tableHeader,
-          gridTemplateColumns: "24px 1fr 40px 40px 40px 60px",
+          gridTemplateColumns: "20px 1fr 40px 40px 40px 60px",
         }}>
           {headerColumns.map((col) => (
             <div key={col} style={col !== "" && col !== "Player" ? { textAlign: "center" } : {}}>{col}</div>
@@ -648,7 +633,7 @@ function Leaderboard({ onUserClick, goBack }) {
             key={entry.user_id}
             style={{
               ...styles.tableRow,
-              gridTemplateColumns: "24px 1fr 40px 40px 40px 60px",
+              gridTemplateColumns: "20px 1fr 40px 40px 40px 60px",
             }}
             onMouseEnter={(e) => {
               Object.assign(e.currentTarget.style, styles.rowHover);
@@ -658,7 +643,7 @@ function Leaderboard({ onUserClick, goBack }) {
               e.currentTarget.style.boxShadow = "none";
             }}
           >
-            <div style={{...styles.rank, minWidth: "24px"}}>{getMedalEmoji(index)}</div>
+            <div style={{...styles.rank, minWidth: "20px"}}>{getMedalEmoji(index)}</div>
             <h3
               style={styles.username}
               onClick={(e) => {
@@ -825,9 +810,9 @@ function Leaderboard({ onUserClick, goBack }) {
             No scores yet. Be the first to play! 🎮
           </div>
         ) : activeTab === "words" ? (
-          renderScoresTable(["", "", "Player", "Words"], "24px 40px 1fr 60px")
+          renderScoresTable(["", "", "Player", "Words"], "20px 30px 1fr 60px")
         ) : (
-          renderScoresTable(["", "", "Player", "Words", "Score"], "24px 40px 1fr 60px 80px")
+          renderScoresTable(["", "", "Player", "Words", "Score"], "20px 30px 1fr 60px 80px")
         )}
       </div>
     </div>
