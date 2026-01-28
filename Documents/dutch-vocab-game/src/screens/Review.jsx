@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 
-
 function Review({ goBack }) {
   const [words, setWords] = useState([]);
   const [reviewWords, setReviewWords] = useState([]);
@@ -12,29 +11,28 @@ function Review({ goBack }) {
   const [showAnswer, setShowAnswer] = useState(false);
   const [userId, setUserId] = useState(null);
 
-
   // Filter states
   const [selectedCategories, setSelectedCategories] = useState(new Set());
   const [selectedDifficulties, setSelectedDifficulties] = useState(new Set());
-  const [showMastered, setShowMastered] = useState(false);
+  const [masteredFilter, setMasteredFilter] = useState("both");
   const [shuffle, setShuffle] = useState(false);
-
 
   // UI states
   const [categories, setCategories] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [reportNotes, setReportNotes] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
   const inputRef = useRef(null);
 
-
   // ============================================================================
-  // FUNCTION: Update user progress (salva direttamente in user_progress)
+  // FUNCTION: Update user progress
   // ============================================================================
   const updateUserProgress = async (wordId, isCorrect) => {
     if (!userId) return;
 
-
     try {
-      // 1. Cerca se esiste già user_progress per questa word
       const { data: existing, error: fetchError } = await supabase
         .from("user_progress")
         .select("*")
@@ -42,15 +40,12 @@ function Review({ goBack }) {
         .eq("word_id", wordId)
         .single();
 
-
       if (fetchError && fetchError.code !== "PGRST116") {
         console.error("Fetch error:", fetchError);
         return;
       }
 
-
       if (existing) {
-        // 2. UPDATE: incrementa correct_count o incorrect_count
         const newCorrectCount = isCorrect
           ? existing.correct_count + 1
           : existing.correct_count;
@@ -58,7 +53,6 @@ function Review({ goBack }) {
           ? existing.incorrect_count + 1
           : existing.incorrect_count;
         const isMastered = newCorrectCount >= 10;
-
 
         await supabase
           .from("user_progress")
@@ -70,7 +64,6 @@ function Review({ goBack }) {
           })
           .eq("id", existing.id);
       } else {
-        // 3. INSERT: crea nuova riga
         await supabase.from("user_progress").insert([
           {
             user_id: userId,
@@ -87,6 +80,41 @@ function Review({ goBack }) {
     }
   };
 
+  // ============================================================================
+  // FUNCTION: Submit error report to database
+  // ============================================================================
+  const submitErrorReport = async () => {
+    if (!reportText.trim() || !userId) return;
+
+    setReportLoading(true);
+    try {
+      const currentWord = reviewWords[currentIndex];
+      
+      await supabase.from("word_issues").insert([
+        {
+          word_id: currentWord.id,
+          user_id: userId,
+          english: currentWord.english,
+          dutch: currentWord.dutch,
+          user_answer: answer.trim(),
+          suggested_correction: reportText.trim(),
+          feedback_text: reportNotes.trim(),
+          resolved: false,
+        },
+      ]);
+
+      setReportText("");
+      setReportNotes("");
+      setReportOpen(false);
+      
+      alert("✅ Thank you! Your report has been submitted. We'll review it soon!");
+    } catch (error) {
+      console.error("Error submitting report:", error);
+      alert("❌ Error submitting report. Please try again.");
+    } finally {
+      setReportLoading(false);
+    }
+  };
 
   // ============================================================================
   // EFFECT: Load words with progress
@@ -98,26 +126,20 @@ function Review({ goBack }) {
         const { data: userData } = await supabase.auth.getUser();
         const currentUserId = userData.user?.id;
 
-
         if (!currentUserId) {
           alert("You must be logged in to use Review Mode.");
           goBack();
           return;
         }
 
-
         setUserId(currentUserId);
 
-
-        // Get all user's words (mastered + non-mastered)
         const { data: userProgress, error: progressError } = await supabase
           .from("user_progress")
           .select("word_id, correct_count, incorrect_count, mastered")
           .eq("user_id", currentUserId);
 
-
         if (progressError) throw progressError;
-
 
         if (userProgress.length === 0) {
           setWords([]);
@@ -125,21 +147,15 @@ function Review({ goBack }) {
           return;
         }
 
-
         const wordIds = userProgress.map((p) => p.word_id);
 
-
-        // Get word details
         const { data: wordDetails, error: wordsError } = await supabase
           .from("words")
           .select("*")
           .in("id", wordIds);
 
-
         if (wordsError) throw wordsError;
 
-
-        // Merge word details with progress
         const wordsWithProgress = wordDetails.map((word) => {
           const progress = userProgress.find((p) => p.word_id === word.id);
           const masteryPercent =
@@ -151,7 +167,6 @@ function Review({ goBack }) {
                 )
               : 0;
 
-
           return {
             ...word,
             correct_count: progress.correct_count,
@@ -161,21 +176,13 @@ function Review({ goBack }) {
           };
         });
 
-
-        // Extract unique categories
         const uniqueCategories = [
           ...new Set(wordsWithProgress.map((w) => w.category)),
         ].sort();
         setCategories(uniqueCategories);
 
-
-        // Initialize all categories as selected
         setSelectedCategories(new Set(uniqueCategories));
-
-
-        // Initialize all difficulties (1-10) as selected
         setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
-
 
         setWords(wordsWithProgress);
       } catch (error) {
@@ -185,10 +192,8 @@ function Review({ goBack }) {
       }
     };
 
-
     fetchWordsToReview();
   }, []);
-
 
   // ============================================================================
   // EFFECT: Apply filters and shuffle
@@ -196,47 +201,38 @@ function Review({ goBack }) {
   useEffect(() => {
     let filtered = words;
 
-
-    // Filter by category
     if (selectedCategories.size > 0) {
       filtered = filtered.filter((w) =>
         selectedCategories.has(w.category)
       );
     }
 
-
-    // Filter by difficulty (1-10)
     if (selectedDifficulties.size > 0) {
       filtered = filtered.filter((w) =>
         selectedDifficulties.has(w.difficulty)
       );
     }
 
-
-    // Filter mastered words
-    if (!showMastered) {
+    if (masteredFilter === "nonmastered") {
       filtered = filtered.filter((w) => !w.mastered);
+    } else if (masteredFilter === "mastered") {
+      filtered = filtered.filter((w) => w.mastered);
     }
 
-
-    // Shuffle if enabled
     if (shuffle) {
       filtered = [...filtered].sort(() => Math.random() - 0.5);
     } else {
-      // Sort by mastery percent (ascending - hardest first)
       filtered = [...filtered].sort(
         (a, b) => a.masteryPercent - b.masteryPercent
       );
     }
 
-
     setReviewWords(filtered);
     setCurrentIndex(0);
-  }, [words, selectedCategories, selectedDifficulties, showMastered, shuffle]);
-
+  }, [words, selectedCategories, selectedDifficulties, masteredFilter, shuffle]);
 
   // ============================================================================
-  // EFFECT: Auto-focus input on mount and after answer
+  // EFFECT: Auto-focus input
   // ============================================================================
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -245,9 +241,8 @@ function Review({ goBack }) {
     return () => clearTimeout(timer);
   }, [currentIndex, showAnswer]);
 
-
   // ============================================================================
-  // FUNCTION: Normalize text for comparison
+  // FUNCTION: Normalize text
   // ============================================================================
   const normalize = (str) => {
     return str
@@ -262,7 +257,6 @@ function Review({ goBack }) {
       .replace(/\s+/g, " ");
   };
 
-
   // ============================================================================
   // FUNCTION: Handle answer submission
   // ============================================================================
@@ -270,13 +264,11 @@ function Review({ goBack }) {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
 
-
     const correctFull = reviewWords[currentIndex].dutch.toLowerCase().trim();
     const correctBase = correctFull
       .split(",")[0]
       .replace(/^(de |het |een |het )/, "")
       .trim();
-
 
     const normalizedAnswer = normalize(userAnswer);
     const normalizedFull = normalize(correctFull);
@@ -284,17 +276,13 @@ function Review({ goBack }) {
     const normalizedWithDe = normalize(`de ${correctBase}`);
     const normalizedWithHet = normalize(`het ${correctBase}`);
 
-
     const isCorrect =
       normalizedAnswer === normalizedFull ||
       normalizedAnswer === normalizedBase ||
       normalizedAnswer === normalizedWithDe ||
       normalizedAnswer === normalizedWithHet;
 
-
-    // 🔥 SALVA PROGRESSO SU DATABASE
     await updateUserProgress(reviewWords[currentIndex].id, isCorrect);
-
 
     if (isCorrect) {
       setFeedback("✅ Correct!");
@@ -302,10 +290,9 @@ function Review({ goBack }) {
       setFeedback(`❌ Wrong! The answer is '${reviewWords[currentIndex].dutch}'.`);
     }
 
-
     setShowAnswer(true);
+    setReportOpen(false);
   };
-
 
   // ============================================================================
   // FUNCTION: Navigate to next word
@@ -316,9 +303,11 @@ function Review({ goBack }) {
       setAnswer("");
       setFeedback("");
       setShowAnswer(false);
+      setReportOpen(false);
+      setReportText("");
+      setReportNotes("");
     }
   };
-
 
   // ============================================================================
   // FUNCTION: Navigate to previous word
@@ -329,9 +318,11 @@ function Review({ goBack }) {
       setAnswer("");
       setFeedback("");
       setShowAnswer(false);
+      setReportOpen(false);
+      setReportText("");
+      setReportNotes("");
     }
   };
-
 
   // ============================================================================
   // FUNCTION: Toggle category filter
@@ -346,7 +337,6 @@ function Review({ goBack }) {
     setSelectedCategories(newSet);
   };
 
-
   // ============================================================================
   // FUNCTION: Select All/Deselect All categories
   // ============================================================================
@@ -357,7 +347,6 @@ function Review({ goBack }) {
       setSelectedCategories(new Set(categories));
     }
   };
-
 
   // ============================================================================
   // FUNCTION: Toggle difficulty filter
@@ -372,7 +361,6 @@ function Review({ goBack }) {
     setSelectedDifficulties(newSet);
   };
 
-
   // ============================================================================
   // FUNCTION: Select All/Deselect All difficulties
   // ============================================================================
@@ -384,7 +372,6 @@ function Review({ goBack }) {
     }
   };
 
-
   // ============================================================================
   // LOADING STATE
   // ============================================================================
@@ -395,7 +382,6 @@ function Review({ goBack }) {
       </div>
     );
   }
-
 
   // ============================================================================
   // EMPTY STATE
@@ -411,7 +397,6 @@ function Review({ goBack }) {
       </div>
     );
   }
-
 
   // ============================================================================
   // NO WORDS AFTER FILTERS
@@ -437,7 +422,6 @@ function Review({ goBack }) {
           </button>
         </div>
 
-
         <div style={styles.filtersPanel}>
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -446,10 +430,8 @@ function Review({ goBack }) {
             🔧 Filters {filtersOpen ? "▼" : "▶"}
           </button>
 
-
           {filtersOpen && (
             <div style={styles.filtersContent}>
-              {/* Categories */}
               <div style={styles.filterGroup}>
                 <div style={styles.filterHeader}>
                   <h4 style={styles.filterTitle}>Categories</h4>
@@ -477,8 +459,6 @@ function Review({ goBack }) {
                 </div>
               </div>
 
-
-              {/* Difficulty */}
               <div style={styles.filterGroup}>
                 <div style={styles.filterHeader}>
                   <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
@@ -504,22 +484,42 @@ function Review({ goBack }) {
                 </div>
               </div>
 
-
-              {/* Show Mastered */}
               <div style={styles.filterGroup}>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={showMastered}
-                    onChange={(e) => setShowMastered(e.target.checked)}
-                    style={styles.checkbox}
-                  />
-                  Include mastered words
-                </label>
+                <h4 style={styles.filterTitle}>Word Status</h4>
+                <div style={styles.checkboxGroup}>
+                  <label style={styles.checkboxLabel}>
+                    <input
+                      type="radio"
+                      name="mastered"
+                      checked={masteredFilter === "nonmastered"}
+                      onChange={() => setMasteredFilter("nonmastered")}
+                      style={styles.checkbox}
+                    />
+                    Non-mastered only
+                  </label>
+                  <label style={styles.checkboxLabel}>
+                    <input
+                      type="radio"
+                      name="mastered"
+                      checked={masteredFilter === "mastered"}
+                      onChange={() => setMasteredFilter("mastered")}
+                      style={styles.checkbox}
+                    />
+                    Mastered only
+                  </label>
+                  <label style={styles.checkboxLabel}>
+                    <input
+                      type="radio"
+                      name="mastered"
+                      checked={masteredFilter === "both"}
+                      onChange={() => setMasteredFilter("both")}
+                      style={styles.checkbox}
+                    />
+                    Both
+                  </label>
+                </div>
               </div>
 
-
-              {/* Shuffle */}
               <div style={styles.filterGroup}>
                 <label style={styles.checkboxLabel}>
                   <input
@@ -535,12 +535,10 @@ function Review({ goBack }) {
           )}
         </div>
 
-
         <div style={styles.emptyMessage}>
           <p style={styles.emptyMessageText}>No words to review with current filters.</p>
           <p style={styles.emptyMessageText}>Try adjusting your settings above.</p>
         </div>
-
 
         <button onClick={goBack} style={styles.secondaryButton}>
           Back to Menu
@@ -549,16 +547,13 @@ function Review({ goBack }) {
     );
   }
 
-
   const currentWord = reviewWords[currentIndex];
-
 
   // ============================================================================
   // MAIN RENDER
   // ============================================================================
   return (
     <div style={styles.container}>
-      {/* HEADER - STICKY */}
       <div style={styles.header}>
         <h1 style={styles.title}>📚 Review</h1>
         <button
@@ -577,8 +572,6 @@ function Review({ goBack }) {
         </button>
       </div>
 
-
-      {/* PROGRESS BAR */}
       <div style={styles.progressBar}>
         <div
           style={{
@@ -588,25 +581,21 @@ function Review({ goBack }) {
         />
       </div>
 
-
-      {/* STATS GRID - COMPACT ON MOBILE */}
       <div style={styles.statsGrid}>
         <div style={styles.statItem}>
-          <span>📊</span> {currentIndex + 1}/{reviewWords.length}
+          📊 {currentIndex + 1}/{reviewWords.length}
         </div>
         <div style={styles.statItem}>
-          <span>📈</span> {currentWord.masteryPercent}%
+          📈 {currentWord.masteryPercent}%
         </div>
         <div style={styles.statItem}>
-          <span>✅</span> {currentWord.correct_count}
+          ✅ {currentWord.correct_count}
         </div>
         <div style={styles.statItem}>
-          <span>❌</span> {currentWord.incorrect_count}
+          ❌ {currentWord.incorrect_count}
         </div>
       </div>
 
-
-      {/* MASTERY BAR */}
       <div style={styles.masteryBarContainer}>
         <div style={styles.masteryBar}>
           <div
@@ -621,8 +610,6 @@ function Review({ goBack }) {
         </div>
       </div>
 
-
-      {/* FILTERS PANEL */}
       <div style={styles.filtersPanel}>
         <button
           onClick={() => setFiltersOpen(!filtersOpen)}
@@ -631,10 +618,8 @@ function Review({ goBack }) {
           🔧 Filters {filtersOpen ? "▼" : "▶"}
         </button>
 
-
         {filtersOpen && (
           <div style={styles.filtersContent}>
-            {/* Categories */}
             <div style={styles.filterGroup}>
               <div style={styles.filterHeader}>
                 <h4 style={styles.filterTitle}>Categories</h4>
@@ -662,8 +647,6 @@ function Review({ goBack }) {
               </div>
             </div>
 
-
-            {/* Difficulty */}
             <div style={styles.filterGroup}>
               <div style={styles.filterHeader}>
                 <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
@@ -689,22 +672,42 @@ function Review({ goBack }) {
               </div>
             </div>
 
-
-            {/* Show Mastered */}
             <div style={styles.filterGroup}>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={showMastered}
-                  onChange={(e) => setShowMastered(e.target.checked)}
-                  style={styles.checkbox}
-                />
-                Include mastered words
-              </label>
+              <h4 style={styles.filterTitle}>Word Status</h4>
+              <div style={styles.checkboxGroup}>
+                <label style={styles.checkboxLabel}>
+                  <input
+                    type="radio"
+                    name="mastered"
+                    checked={masteredFilter === "nonmastered"}
+                    onChange={() => setMasteredFilter("nonmastered")}
+                    style={styles.checkbox}
+                  />
+                  Non-mastered only
+                </label>
+                <label style={styles.checkboxLabel}>
+                  <input
+                    type="radio"
+                    name="mastered"
+                    checked={masteredFilter === "mastered"}
+                    onChange={() => setMasteredFilter("mastered")}
+                    style={styles.checkbox}
+                  />
+                  Mastered only
+                </label>
+                <label style={styles.checkboxLabel}>
+                  <input
+                    type="radio"
+                    name="mastered"
+                    checked={masteredFilter === "both"}
+                    onChange={() => setMasteredFilter("both")}
+                    style={styles.checkbox}
+                  />
+                  Both
+                </label>
+              </div>
             </div>
 
-
-            {/* Shuffle */}
             <div style={styles.filterGroup}>
               <label style={styles.checkboxLabel}>
                 <input
@@ -720,8 +723,6 @@ function Review({ goBack }) {
         )}
       </div>
 
-
-      {/* QUESTION AREA - SCROLLABLE */}
       <div style={styles.scrollableContent}>
         <div style={styles.questionContainer}>
           <p style={styles.questionLabel}>
@@ -730,7 +731,6 @@ function Review({ goBack }) {
           <h2 style={styles.questionText}>Translate to Dutch:</h2>
           <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
         </div>
-
 
         {currentWord.example_nl && (
           <div style={styles.exampleBox}>
@@ -744,7 +744,6 @@ function Review({ goBack }) {
             )}
           </div>
         )}
-
 
         {!showAnswer ? (
           <form onSubmit={handleSubmit} style={styles.form}>
@@ -776,6 +775,67 @@ function Review({ goBack }) {
               <p style={styles.answerLabel}>Correct Answer:</p>
               <p style={styles.answerText}>{currentWord.dutch}</p>
             </div>
+
+            {feedback.includes("❌") && !reportOpen && (
+              <button
+                onClick={() => setReportOpen(true)}
+                style={styles.reportButton}
+              >
+                🚨 Report Error
+              </button>
+            )}
+
+            {reportOpen && feedback.includes("❌") && (
+              <div style={styles.reportForm}>
+                <h3 style={styles.reportTitle}>Report Incorrect Translation</h3>
+                
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>What should the correct translation be?</label>
+                  <input
+                    type="text"
+                    value={reportText}
+                    onChange={(e) => setReportText(e.target.value)}
+                    placeholder="Enter correct translation..."
+                    style={styles.reportInput}
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.formLabel}>Additional notes (optional)</label>
+                  <textarea
+                    value={reportNotes}
+                    onChange={(e) => setReportNotes(e.target.value)}
+                    placeholder="Add any extra context..."
+                    style={styles.reportTextarea}
+                  />
+                </div>
+
+                <div style={styles.reportButtonsGroup}>
+                  <button
+                    onClick={submitErrorReport}
+                    disabled={reportLoading || !reportText.trim()}
+                    style={{
+                      ...styles.submitReportBtn,
+                      opacity: reportLoading || !reportText.trim() ? 0.6 : 1,
+                      cursor: reportLoading || !reportText.trim() ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {reportLoading ? "Submitting..." : "Submit Report"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setReportOpen(false);
+                      setReportText("");
+                      setReportNotes("");
+                    }}
+                    style={styles.cancelReportBtn}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={nextWord}
               style={{
@@ -790,7 +850,6 @@ function Review({ goBack }) {
             </button>
           </div>
         )}
-
 
         <div style={styles.navigationButtons}>
           <button
@@ -813,10 +872,6 @@ function Review({ goBack }) {
   );
 }
 
-
-// ============================================================================
-// STYLES - DARK THEME (MATCHING Play.jsx)
-// ============================================================================
 const styles = {
   container: {
     minHeight: "100vh",
@@ -895,23 +950,26 @@ const styles = {
   },
   statsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
+    gridTemplateColumns: "repeat(4, 1fr)",
     gap: "8px",
     padding: "12px 16px",
-    maxWidth: "600px",
+    maxWidth: "800px",
     margin: "0 auto",
     width: "100%",
     boxSizing: "border-box",
   },
   statItem: {
-    padding: "10px 12px",
+    padding: "10px 8px",
     background: "rgba(30, 58, 138, 0.6)",
     border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "6px",
-    fontSize: "clamp(11px, 2.5vw, 13px)",
+    fontSize: "clamp(10px, 2.2vw, 12px)",
     color: "#bfdbfe",
     fontWeight: "500",
     textAlign: "center",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   masteryBarContainer: {
     maxWidth: "600px",
@@ -1126,6 +1184,92 @@ const styles = {
     color: "white",
     margin: "0",
   },
+  reportButton: {
+    padding: "10px 16px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    fontWeight: "600",
+    background: "rgba(239, 68, 68, 0.2)",
+    color: "#fca5a5",
+    border: "1px solid rgba(239, 68, 68, 0.4)",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+    display: "block",
+    margin: "12px auto",
+  },
+  reportForm: {
+    background: "rgba(30, 58, 138, 0.8)",
+    border: "2px solid rgba(239, 68, 68, 0.4)",
+    borderRadius: "8px",
+    padding: "16px",
+    margin: "12px 20px",
+  },
+  reportTitle: {
+    fontSize: "clamp(13px, 2.5vw, 14px)",
+    color: "#fca5a5",
+    margin: "0 0 12px 0",
+    fontWeight: "600",
+  },
+  formGroup: {
+    marginBottom: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  formLabel: {
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    color: "#bfdbfe",
+    fontWeight: "500",
+  },
+  reportInput: {
+    padding: "10px 12px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
+    fontFamily: "inherit",
+  },
+  reportTextarea: {
+    padding: "10px 12px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    background: "rgba(255,255,255,0.95)",
+    color: "#0f172a",
+    fontFamily: "inherit",
+    minHeight: "80px",
+    resize: "vertical",
+  },
+  reportButtonsGroup: {
+    display: "flex",
+    gap: "8px",
+    marginTop: "12px",
+  },
+  submitReportBtn: {
+    flex: 1,
+    padding: "10px 12px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    fontWeight: "600",
+    background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+  cancelReportBtn: {
+    flex: 1,
+    padding: "10px 12px",
+    fontSize: "clamp(11px, 2.5vw, 12px)",
+    fontWeight: "600",
+    background: "rgba(255,255,255,0.1)",
+    color: "#bfdbfe",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
   primaryButton: {
     padding: "12px 20px",
     fontSize: "clamp(13px, 2.5vw, 14px)",
@@ -1175,6 +1319,5 @@ const styles = {
     margin: "6px 0",
   },
 };
-
 
 export default Review;
