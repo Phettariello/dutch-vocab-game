@@ -11,15 +11,19 @@ function Leaderboard({ onUserClick, goBack }) {
   const [userLevels, setUserLevels] = useState({});
   const [userMasteredCounts, setUserMasteredCounts] = useState({});
   const [medalLeaderboard, setMedalLeaderboard] = useState([]);
-  const [medalType, setMedalType] = useState("weekly"); // weekly or monthly
+  const [medalType, setMedalType] = useState("daily");
+  const [sortColumn, setSortColumn] = useState(null);
+  const [sortAscending, setSortAscending] = useState(false);
 
 
   // ============================================================================
-  // EFFECT: Fetch on mount and tab change ONLY
+  // EFFECT: Fetch on mount and tab change
   // ============================================================================
   useEffect(() => {
     if (activeTab === "medals") {
       fetchMedalLeaderboard();
+    } else if (activeTab === "words") {
+      fetchWordsLeaderboard();
     } else {
       fetchLeaderboard();
       fetchMedals();
@@ -41,7 +45,6 @@ function Leaderboard({ onUserClick, goBack }) {
       { code: "C1", min: 2001, max: 2500 },
       { code: "C2", min: 2501, max: 3000 },
     ];
-
 
     for (let level of levels) {
       if (wordsMastered >= level.min && wordsMastered <= level.max) {
@@ -87,10 +90,8 @@ function Leaderboard({ onUserClick, goBack }) {
         .from("user_progress")
         .select("user_id, mastered");
 
-
       const levelMap = {};
       const userIds = [...new Set(progressData?.map((p) => p.user_id) || [])];
-
 
       userIds.forEach((userId) => {
         const wordsMastered = progressData?.filter(
@@ -98,7 +99,6 @@ function Leaderboard({ onUserClick, goBack }) {
         ).length || 0;
         levelMap[userId] = calculateLevel(wordsMastered);
       });
-
 
       setUserLevels(levelMap);
     } catch (error) {
@@ -108,32 +108,78 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // FUNCTION: Fetch medals
+  // FUNCTION: Fetch medals (weekly + monthly)
   // ============================================================================
   const fetchMedals = async () => {
     try {
-      const { data: weeklyMedals, error: weeklyError } = await supabase
+      const { data: weeklyMedals } = await supabase
         .from("weekly_medals")
         .select("user_id, medal_type");
 
-
-      const { data: monthlyMedals, error: monthlyError } = await supabase
+      const { data: monthlyMedals } = await supabase
         .from("monthly_medals")
         .select("user_id, medal_type");
 
-
-      if (!weeklyError && !monthlyError) {
-        const medalCounts = {};
-        [...(weeklyMedals || []), ...(monthlyMedals || [])].forEach((medal) => {
-          if (!medalCounts[medal.user_id]) {
-            medalCounts[medal.user_id] = { gold: 0, silver: 0, bronze: 0 };
-          }
-          medalCounts[medal.user_id][medal.medal_type]++;
-        });
-        setMedals(medalCounts);
-      }
+      const medalCounts = {};
+      [...(weeklyMedals || []), ...(monthlyMedals || [])].forEach((medal) => {
+        if (!medalCounts[medal.user_id]) {
+          medalCounts[medal.user_id] = { gold: 0, silver: 0, bronze: 0 };
+        }
+        medalCounts[medal.user_id][medal.medal_type]++;
+      });
+      setMedals(medalCounts);
     } catch (error) {
       console.error("Error fetching medals:", error);
+    }
+  };
+
+
+  // ============================================================================
+  // FUNCTION: Fetch words leaderboard
+  // ============================================================================
+  const fetchWordsLeaderboard = async () => {
+    setLoading(true);
+    try {
+      const { data: progressData } = await supabase
+        .from("user_progress")
+        .select("user_id, mastered");
+
+      const wordsCounts = {};
+      progressData?.forEach((progress) => {
+        if (!wordsCounts[progress.user_id]) {
+          wordsCounts[progress.user_id] = 0;
+        }
+        if (progress.mastered) {
+          wordsCounts[progress.user_id]++;
+        }
+      });
+
+      let leaderboardData = Object.entries(wordsCounts).map(([userId, count]) => ({
+        user_id: userId,
+        wordsMastered: count,
+      }));
+
+      leaderboardData.sort((a, b) => b.wordsMastered - a.wordsMastered);
+      leaderboardData = leaderboardData.slice(0, 10);
+
+      const userIds = leaderboardData.map((entry) => entry.user_id);
+      const { data: profilesData } = await supabase
+        .from("profiles")
+        .select("user_id, username")
+        .in("user_id", userIds);
+
+      const usernamesMap = {};
+      profilesData?.forEach((profile) => {
+        usernamesMap[profile.user_id] = profile.username;
+      });
+      setUsernames(usernamesMap);
+
+      setLeaderboard(leaderboardData);
+      setSortColumn(null);
+    } catch (error) {
+      console.error("Error fetching words leaderboard:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -144,16 +190,14 @@ function Leaderboard({ onUserClick, goBack }) {
   const fetchMedalLeaderboard = async () => {
     setLoading(true);
     try {
-      const table = medalType === "weekly" ? "weekly_medals" : "monthly_medals";
+      const table = 
+        medalType === "daily" ? "daily_medals" :
+        medalType === "weekly" ? "weekly_medals" :
+        "monthly_medals";
 
-
-      const { data: medalData, error } = await supabase
+      const { data: medalData } = await supabase
         .from(table)
         .select("user_id, medal_type");
-
-
-      if (error) throw error;
-
 
       const medalCounts = {};
       medalData?.forEach((medal) => {
@@ -163,21 +207,18 @@ function Leaderboard({ onUserClick, goBack }) {
         medalCounts[medal.user_id][medal.medal_type]++;
       });
 
-
       const userIds = Object.keys(medalCounts);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, username")
         .in("user_id", userIds);
 
-
       const usernamesMap = {};
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
 
-
-      const combined = userIds
+      let combined = userIds
         .map((userId) => {
           const counts = medalCounts[userId];
           const totalScore = counts.gold * 3 + counts.silver * 2 + counts.bronze;
@@ -190,8 +231,8 @@ function Leaderboard({ onUserClick, goBack }) {
         })
         .sort((a, b) => b.totalScore - a.totalScore);
 
-
       setMedalLeaderboard(combined);
+      setSortColumn(null);
     } catch (error) {
       console.error("Error fetching medal leaderboard:", error);
     } finally {
@@ -201,14 +242,10 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // FUNCTION: Get today start (00:00 CET) - ISO string for UTC comparison
+  // FUNCTION: Get today start (00:00 CET)
   // ============================================================================
   const getTodayStart = () => {
     const now = new Date();
-    // Create date at local midnight
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    // Adjust to CET (UTC+1, or UTC+2 in DST) and convert to ISO
-    // For simplicity: get UTC timestamp of local midnight in CET context
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
@@ -245,41 +282,26 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // FUNCTION: Fetch leaderboard data
+  // FUNCTION: Fetch leaderboard data (scores)
   // ============================================================================
   const fetchLeaderboard = async () => {
     setLoading(true);
     try {
       let query = supabase.from("sessions").select("*");
 
-
-      // Apply date filtering based on active tab
       if (activeTab === "today") {
         const todayStart = getTodayStart();
-        console.log(`[Today] Filter from: ${todayStart}`);
         query = query.gte("created_at", todayStart);
       } else if (activeTab === "thisWeek") {
         const weekStart = getWeekStart();
-        console.log(`[Week] Filter from: ${weekStart}`);
         query = query.gte("created_at", weekStart);
       } else if (activeTab === "thisMonth") {
         const monthStart = getMonthStart();
-        console.log(`[Month] Filter from: ${monthStart}`);
         query = query.gte("created_at", monthStart);
       }
 
+      const { data } = await query.order("score", { ascending: false });
 
-      const { data, error } = await query.order("score", {
-        ascending: false,
-      });
-
-
-      if (error) throw error;
-
-      console.log(`[${activeTab}] Found ${data?.length || 0} sessions`);
-
-
-      // Group by user_id and calculate stats
       const userStats = {};
       data?.forEach((session) => {
         const userId = session.user_id;
@@ -304,30 +326,21 @@ function Leaderboard({ onUserClick, goBack }) {
         );
       });
 
-
-      // Convert to array and sort based on active tab
       let leaderboardData = Object.values(userStats);
 
-
       if (activeTab === "bestScore") {
-        leaderboardData.sort(
-          (a, b) => b.highestScore - a.highestScore
-        );
+        leaderboardData.sort((a, b) => b.highestScore - a.highestScore);
       } else {
         leaderboardData.sort((a, b) => b.totalScore - a.totalScore);
       }
 
-
       leaderboardData = leaderboardData.slice(0, 10);
 
-
-      // Fetch usernames
       const userIds = leaderboardData.map((entry) => entry.user_id);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, username")
         .in("user_id", userIds);
-
 
       const usernamesMap = {};
       profilesData?.forEach((profile) => {
@@ -335,13 +348,39 @@ function Leaderboard({ onUserClick, goBack }) {
       });
       setUsernames(usernamesMap);
 
-
       setLeaderboard(leaderboardData);
+      setSortColumn(null);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
     } finally {
       setLoading(false);
     }
+  };
+
+
+  // ============================================================================
+  // FUNCTION: Handle column sort
+  // ============================================================================
+  const handleSort = (column) => {
+    if (sortColumn === column) {
+      setSortAscending(!sortAscending);
+    } else {
+      setSortColumn(column);
+      setSortAscending(false);
+    }
+
+    let sorted = [...leaderboard];
+    sorted.sort((a, b) => {
+      let aVal = a[column];
+      let bVal = b[column];
+      
+      if (sortColumn === column && sortAscending) {
+        return aVal - bVal;
+      } else {
+        return bVal - aVal;
+      }
+    });
+    setLeaderboard(sorted);
   };
 
 
@@ -400,7 +439,7 @@ function Leaderboard({ onUserClick, goBack }) {
     contentContainer: {
       flex: 1,
       padding: "16px",
-      maxWidth: "1000px",
+      maxWidth: "1200px",
       margin: "0 auto",
       width: "100%",
       boxSizing: "border-box",
@@ -414,16 +453,24 @@ function Leaderboard({ onUserClick, goBack }) {
       textTransform: "uppercase",
       letterSpacing: "0.5px",
     },
-    tabsContainer: {
+    tabsContainerRow1: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(80px, 1fr))",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: "8px",
+      marginBottom: "12px",
+      maxWidth: "600px",
+      margin: "0 auto 12px auto",
+    },
+    tabsContainerRow2: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4, 1fr)",
       gap: "8px",
       marginBottom: "20px",
       maxWidth: "700px",
       margin: "0 auto 20px auto",
     },
     tab: (isActive) => ({
-      padding: "9px 12px",
+      padding: "10px 12px",
       fontSize: "clamp(10px, 2.3vw, 12px)",
       fontWeight: "600",
       border: isActive ? "none" : "1px solid rgba(6,182,212,0.2)",
@@ -442,6 +489,7 @@ function Leaderboard({ onUserClick, goBack }) {
       gap: "8px",
       justifyContent: "center",
       marginBottom: "16px",
+      flexWrap: "wrap",
     },
     medalTypeButton: (isActive) => ({
       padding: "8px 16px",
@@ -461,43 +509,35 @@ function Leaderboard({ onUserClick, goBack }) {
     listContainer: {
       display: "flex",
       flexDirection: "column",
-      gap: "12px",
+      gap: "10px",
     },
     card: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "10px",
-      padding: "14px",
+      borderRadius: "8px",
+      padding: "12px 14px",
       cursor: "pointer",
       transition: "all 0.3s ease",
       boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
       display: "grid",
-      gridTemplateColumns: "45px 1fr auto",
-      alignItems: "center",
+      gridTemplateColumns: "auto 1fr",
       gap: "12px",
+      alignItems: "center",
+    },
+    cardContent: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(80px, 1fr))",
+      gap: "12px",
+      alignItems: "center",
+      fontSize: "clamp(11px, 2vw, 13px)",
+      color: "white",
     },
     rank: {
-      fontSize: "clamp(20px, 4vw, 28px)",
+      fontSize: "clamp(18px, 4vw, 22px)",
       fontWeight: "bold",
       textAlign: "center",
       color: "#fbbf24",
-    },
-    userInfo: {
-      color: "white",
-      minWidth: "0",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-    },
-    username: {
-      fontSize: "clamp(13px, 3vw, 15px)",
-      fontWeight: "700",
-      margin: "0",
-      color: "#f0f9ff",
-      cursor: "pointer",
-      transition: "color 0.2s",
-      textDecoration: "underline",
-      textDecorationColor: "rgba(6,182,212,0.3)",
+      minWidth: "40px",
     },
     levelBadge: {
       display: "inline-flex",
@@ -505,88 +545,44 @@ function Leaderboard({ onUserClick, goBack }) {
       justifyContent: "center",
       background: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
       borderRadius: "6px",
-      padding: "4px 10px",
-      fontSize: "clamp(10px, 2vw, 12px)",
+      padding: "6px 10px",
+      fontSize: "clamp(10px, 2vw, 11px)",
       fontWeight: "700",
       color: "#0f172a",
-      minWidth: "42px",
+      minWidth: "38px",
       textAlign: "center",
       boxShadow: "0 2px 6px rgba(251, 191, 36, 0.3)",
-      width: "fit-content",
     },
-    stats: {
-      fontSize: "clamp(9px, 2vw, 10px)",
-      color: "#bfdbfe",
-      margin: "0",
-      display: "flex",
-      gap: "14px",
-      flexWrap: "wrap",
+    username: {
+      fontWeight: "700",
+      color: "#f0f9ff",
+      cursor: "pointer",
+      transition: "color 0.2s",
+      textDecoration: "underline",
+      textDecorationColor: "rgba(6,182,212,0.3)",
+      margin: 0,
+      fontSize: "clamp(11px, 2.5vw, 13px)",
     },
-    scoreSection: {
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "flex-end",
-      gap: "8px",
-      minWidth: "80px",
-    },
-    score: {
-      fontSize: "clamp(16px, 3vw, 20px)",
+    statValue: {
+      fontSize: "clamp(12px, 2.5vw, 14px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      textAlign: "right",
-    },
-    masteredBadge: {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "rgba(34, 197, 94, 0.2)",
-      border: "1px solid rgba(34, 197, 94, 0.5)",
-      borderRadius: "6px",
-      padding: "4px 8px",
-      fontSize: "clamp(9px, 2vw, 10px)",
-      fontWeight: "600",
-      color: "#86efac",
-      minWidth: "50px",
       textAlign: "center",
     },
-    medalContainer: {
-      display: "flex",
-      gap: "6px",
-      alignItems: "center",
-      flexShrink: 0,
+    statLabel: {
+      fontSize: "clamp(9px, 1.8vw, 10px)",
+      color: "#bfdbfe",
+      textAlign: "center",
+      margin: "2px 0 0 0",
     },
-    medal: {
-      fontSize: "clamp(14px, 3vw, 16px)",
-      display: "flex",
-      alignItems: "center",
-      gap: "2px",
-    },
-    medalCount: {
-      fontSize: "clamp(8px, 2vw, 9px)",
-      color: "#06b6d4",
-      fontWeight: "600",
-    },
-    medalRow: {
-      display: "flex",
-      gap: "20px",
-      marginTop: "12px",
-      alignItems: "center",
-    },
-    medalItem: {
+    medalValue: {
       display: "flex",
       alignItems: "center",
-      gap: "8px",
-      fontSize: "clamp(12px, 2vw, 14px)",
+      gap: "4px",
+      justifyContent: "center",
     },
     medalEmoji: {
-      fontSize: "clamp(18px, 3vw, 24px)",
-    },
-    medalScore: {
-      fontSize: "clamp(14px, 3vw, 18px)",
-      fontWeight: "bold",
-      color: "#fbbf24",
-      minWidth: "40px",
-      textAlign: "center",
+      fontSize: "clamp(12px, 2vw, 14px)",
     },
     emptyState: {
       textAlign: "center",
@@ -630,19 +626,22 @@ function Leaderboard({ onUserClick, goBack }) {
         {activeTab !== "medals" && (
           <p style={styles.subtitle}>
             {activeTab === "allTime"
-              ? "All-Time Champions"
+              ? "🌟 All-Time Champions"
               : activeTab === "today"
-              ? "Today's Top Performers"
+              ? "📌 Today's Top Performers"
               : activeTab === "thisWeek"
-              ? "This Week's Stars"
+              ? "📅 This Week's Stars"
               : activeTab === "thisMonth"
-              ? "This Month's Heroes"
-              : "Highest Scores"}
+              ? "📆 This Month's Heroes"
+              : activeTab === "bestScore"
+              ? "⚡ Highest Scores"
+              : "📚 Words Masters"}
           </p>
         )}
 
 
-        <div style={styles.tabsContainer}>
+        {/* ROW 1: Today, Week, Month */}
+        <div style={styles.tabsContainerRow1}>
           <button
             style={styles.tab(activeTab === "today")}
             onClick={() => setActiveTab("today")}
@@ -661,6 +660,11 @@ function Leaderboard({ onUserClick, goBack }) {
           >
             📆 Month
           </button>
+        </div>
+
+
+        {/* ROW 2: All Time, Best, Words, Medals */}
+        <div style={styles.tabsContainerRow2}>
           <button
             style={styles.tab(activeTab === "allTime")}
             onClick={() => setActiveTab("allTime")}
@@ -674,6 +678,12 @@ function Leaderboard({ onUserClick, goBack }) {
             ⚡ Best
           </button>
           <button
+            style={styles.tab(activeTab === "words")}
+            onClick={() => setActiveTab("words")}
+          >
+            📚 Words
+          </button>
+          <button
             style={styles.tab(activeTab === "medals")}
             onClick={() => setActiveTab("medals")}
           >
@@ -685,8 +695,14 @@ function Leaderboard({ onUserClick, goBack }) {
         {/* MEDALS SUB-TABS */}
         {activeTab === "medals" && (
           <>
-            <p style={styles.subtitle}>Medal Champions</p>
+            <p style={styles.subtitle}>🏅 Medal Champions</p>
             <div style={styles.medalTypeContainer}>
+              <button
+                style={styles.medalTypeButton(medalType === "daily")}
+                onClick={() => setMedalType("daily")}
+              >
+                ☀️ Daily
+              </button>
               <button
                 style={styles.medalTypeButton(medalType === "weekly")}
                 onClick={() => setMedalType("weekly")}
@@ -705,7 +721,7 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
         {loading ? (
-          <div style={styles.loadingState}>Loading leaderboard...</div>
+          <div style={styles.loadingState}>⏳ Loading leaderboard...</div>
         ) : activeTab === "medals" ? (
           // MEDALS VIEW
           medalLeaderboard.length === 0 ? (
@@ -730,44 +746,53 @@ function Leaderboard({ onUserClick, goBack }) {
                   }}
                 >
                   <div style={styles.rank}>{getMedalEmoji(index)}</div>
-                  <div style={styles.userInfo}>
-                    <h3
-                      style={styles.username}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUserClick(entry.user_id, entry.username);
-                      }}
-                    >
-                      {entry.username}
-                    </h3>
-                    <div style={styles.medalRow}>
-                      {entry.gold > 0 && (
-                        <div style={styles.medalItem}>
+                  <div style={styles.cardContent}>
+                    <div>
+                      <h3
+                        style={styles.username}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUserClick(entry.user_id, entry.username);
+                        }}
+                      >
+                        {entry.username}
+                      </h3>
+                    </div>
+                    {entry.gold > 0 && (
+                      <div>
+                        <div style={styles.medalValue}>
                           <span style={styles.medalEmoji}>🥇</span>
-                          <span style={styles.medalScore}>{entry.gold}</span>
+                          <span style={styles.statValue}>{entry.gold}</span>
                         </div>
-                      )}
-                      {entry.silver > 0 && (
-                        <div style={styles.medalItem}>
+                      </div>
+                    )}
+                    {entry.silver > 0 && (
+                      <div>
+                        <div style={styles.medalValue}>
                           <span style={styles.medalEmoji}>🥈</span>
-                          <span style={styles.medalScore}>{entry.silver}</span>
+                          <span style={styles.statValue}>{entry.silver}</span>
                         </div>
-                      )}
-                      {entry.bronze > 0 && (
-                        <div style={styles.medalItem}>
+                      </div>
+                    )}
+                    {entry.bronze > 0 && (
+                      <div>
+                        <div style={styles.medalValue}>
                           <span style={styles.medalEmoji}>🥉</span>
-                          <span style={styles.medalScore}>{entry.bronze}</span>
+                          <span style={styles.statValue}>{entry.bronze}</span>
                         </div>
-                      )}
+                      </div>
+                    )}
+                    <div>
+                      <div style={styles.statValue}>{entry.totalScore}</div>
+                      <div style={styles.statLabel}>Score</div>
                     </div>
                   </div>
-                  <div style={styles.score}>{entry.totalScore}</div>
                 </div>
               ))}
             </div>
           )
         ) : leaderboard.length === 0 ? (
-          // SCORES VIEW - EMPTY
+          // EMPTY STATE
           <div style={styles.emptyState}>
             No scores yet. Be the first to play! 🎮
           </div>
@@ -786,10 +811,8 @@ function Leaderboard({ onUserClick, goBack }) {
               const userLevel = userLevels[entry.user_id] || "A0";
               const masteredCount = userMasteredCounts[entry.user_id] || 0;
               const displayScore =
-                activeTab === "bestScore"
-                  ? entry.highestScore
-                  : entry.totalScore;
-
+                activeTab === "bestScore" ? entry.highestScore : entry.totalScore;
+              const displayWords = activeTab === "words" ? entry.wordsMastered : null;
 
               return (
                 <div
@@ -807,65 +830,89 @@ function Leaderboard({ onUserClick, goBack }) {
                   }}
                 >
                   <div style={styles.rank}>{getMedalEmoji(index)}</div>
-
-
-                  <div style={styles.userInfo}>
-                    <h3
-                      style={styles.username}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUserClick(entry.user_id, username);
-                      }}
-                    >
-                      {username}
-                    </h3>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <div style={styles.cardContent}>
+                    <div>
                       <div style={styles.levelBadge}>{userLevel}</div>
-                      <div style={styles.masteredBadge}>
-                        📚 {masteredCount}
-                      </div>
                     </div>
-                    <p style={styles.stats}>
-                      <span>📈 Level {entry.bestLevel}</span>
-                      <span>🎮 {entry.sessionsPlayed} sessions</span>
-                    </p>
-                  </div>
-
-
-                  <div style={styles.scoreSection}>
-                    <div style={styles.score}>
-                      {displayScore?.toLocaleString()}
+                    <div>
+                      <h3
+                        style={styles.username}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUserClick(entry.user_id, username);
+                        }}
+                      >
+                        {username}
+                      </h3>
                     </div>
-                    {(userMedals.gold > 0 ||
-                      userMedals.silver > 0 ||
-                      userMedals.bronze > 0) && (
-                      <div style={styles.medalContainer}>
-                        {userMedals.gold > 0 && (
-                          <div style={styles.medal}>
-                            <span>🥇</span>
-                            <span style={styles.medalCount}>
-                              {userMedals.gold}
-                            </span>
-                          </div>
-                        )}
-                        {userMedals.silver > 0 && (
-                          <div style={styles.medal}>
-                            <span>🥈</span>
-                            <span style={styles.medalCount}>
-                              {userMedals.silver}
-                            </span>
-                          </div>
-                        )}
-                        {userMedals.bronze > 0 && (
-                          <div style={styles.medal}>
-                            <span>🥉</span>
-                            <span style={styles.medalCount}>
-                              {userMedals.bronze}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                    {activeTab === "words" ? (
+                      <>
+                        <div>
+                          <div style={styles.statValue}>{displayWords}</div>
+                          <div style={styles.statLabel}>📚 Words</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <div style={styles.statValue}>{masteredCount}</div>
+                          <div style={styles.statLabel}>📚 Words</div>
+                        </div>
+                        <div>
+                          <div style={styles.statValue}>{entry.sessionsPlayed}</div>
+                          <div style={styles.statLabel}>🎮 Games</div>
+                        </div>
+                        <div>
+                          <div style={styles.statValue}>{entry.bestLevel}</div>
+                          <div style={styles.statLabel}>⬆️ Level</div>
+                        </div>
+                      </>
                     )}
+                    <div>
+                      <div style={styles.statValue}>
+                        {displayScore?.toLocaleString()}
+                      </div>
+                      <div style={styles.statLabel}>
+                        {activeTab === "bestScore" ? "🎯 Best" : "⭐ Score"}
+                      </div>
+                    </div>
+                    {!["words"].includes(activeTab) &&
+                      (userMedals.gold > 0 ||
+                        userMedals.silver > 0 ||
+                        userMedals.bronze > 0) && (
+                        <>
+                          {userMedals.gold > 0 && (
+                            <div>
+                              <div style={styles.medalValue}>
+                                <span style={styles.medalEmoji}>🥇</span>
+                              </div>
+                              <div style={{ ...styles.statLabel, color: "#fbbf24" }}>
+                                {userMedals.gold}
+                              </div>
+                            </div>
+                          )}
+                          {userMedals.silver > 0 && (
+                            <div>
+                              <div style={styles.medalValue}>
+                                <span style={styles.medalEmoji}>🥈</span>
+                              </div>
+                              <div style={{ ...styles.statLabel, color: "#c0c0c0" }}>
+                                {userMedals.silver}
+                              </div>
+                            </div>
+                          )}
+                          {userMedals.bronze > 0 && (
+                            <div>
+                              <div style={styles.medalValue}>
+                                <span style={styles.medalEmoji}>🥉</span>
+                              </div>
+                              <div style={{ ...styles.statLabel, color: "#cd7f32" }}>
+                                {userMedals.bronze}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                   </div>
                 </div>
               );
