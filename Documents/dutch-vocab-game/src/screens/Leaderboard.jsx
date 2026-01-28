@@ -7,8 +7,6 @@ function Leaderboard({ onUserClick, goBack }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [usernames, setUsernames] = useState({});
-  const [userLevels, setUserLevels] = useState({});
-  const [userMasteredCounts, setUserMasteredCounts] = useState({});
   const [medalLeaderboard, setMedalLeaderboard] = useState([]);
   const [medalType, setMedalType] = useState("daily");
 
@@ -25,28 +23,6 @@ function Leaderboard({ onUserClick, goBack }) {
       fetchLeaderboard();
     }
   }, [activeTab, medalType]);
-
-
-  // ============================================================================
-  // FUNCTION: Calculate user level from words mastered
-  // ============================================================================
-  const calculateLevel = (wordsMastered) => {
-    const levels = [
-      { code: "A0", min: 0, max: 500 },
-      { code: "A1", min: 501, max: 1000 },
-      { code: "B1", min: 1001, max: 1500 },
-      { code: "B2", min: 1501, max: 2000 },
-      { code: "C1", min: 2001, max: 2500 },
-      { code: "C2", min: 2501, max: 3000 },
-    ];
-
-    for (let level of levels) {
-      if (wordsMastered >= level.min && wordsMastered <= level.max) {
-        return level.code;
-      }
-    }
-    return "C2";
-  };
 
 
   // ============================================================================
@@ -186,30 +162,11 @@ function Leaderboard({ onUserClick, goBack }) {
         .in("user_id", userIds);
 
       const usernamesMap = {};
-      const levelsMap = {};
-      const masteredMap = {};
-
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
 
-      // Fetch mastered counts
-      const { data: progressData } = await supabase
-        .from("user_progress")
-        .select("user_id, mastered")
-        .in("user_id", userIds);
-
-      userIds.forEach((userId) => {
-        const masteredCount = progressData?.filter(
-          (p) => p.user_id === userId && p.mastered
-        ).length || 0;
-        masteredMap[userId] = masteredCount;
-        levelsMap[userId] = calculateLevel(masteredCount);
-      });
-
       setUsernames(usernamesMap);
-      setUserLevels(levelsMap);
-      setUserMasteredCounts(masteredMap);
       setLeaderboard(leaderboardData);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
@@ -229,6 +186,12 @@ function Leaderboard({ onUserClick, goBack }) {
         .from("user_progress")
         .select("user_id, mastered");
 
+      const { data: wordsData } = await supabase
+        .from("words")
+        .select("id");
+
+      const totalWords = wordsData?.length || 0;
+
       const wordsCounts = {};
       progressData?.forEach((progress) => {
         if (!wordsCounts[progress.user_id]) {
@@ -239,9 +202,10 @@ function Leaderboard({ onUserClick, goBack }) {
         }
       });
 
-      let leaderboardData = Object.entries(wordsCounts).map(([userId, count]) => ({
+      let leaderboardData = Object.entries(wordsCounts).map(([userId, masteredCount]) => ({
         user_id: userId,
-        wordsMastered: count,
+        wordsMastered: masteredCount,
+        totalWords: totalWords,
       }));
 
       leaderboardData.sort((a, b) => b.wordsMastered - a.wordsMastered);
@@ -254,21 +218,11 @@ function Leaderboard({ onUserClick, goBack }) {
         .in("user_id", userIds);
 
       const usernamesMap = {};
-      const levelsMap = {};
-
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
 
-      userIds.forEach((userId) => {
-        const masteredCount = leaderboardData.find(
-          (l) => l.user_id === userId
-        )?.wordsMastered || 0;
-        levelsMap[userId] = calculateLevel(masteredCount);
-      });
-
       setUsernames(usernamesMap);
-      setUserLevels(levelsMap);
       setLeaderboard(leaderboardData);
     } catch (error) {
       console.error("Error fetching words leaderboard:", error);
@@ -494,20 +448,6 @@ function Leaderboard({ onUserClick, goBack }) {
       minWidth: "20px",
       textAlign: "center",
     },
-    levelBadge: {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "linear-gradient(135deg, #fbbf24 0%, #f97316 100%)",
-      borderRadius: "4px",
-      padding: "3px 8px",
-      fontSize: "clamp(9px, 1.8vw, 10px)",
-      fontWeight: "700",
-      color: "#0f172a",
-      minWidth: "30px",
-      textAlign: "center",
-      boxShadow: "0 2px 6px rgba(251, 191, 36, 0.3)",
-    },
     username: {
       fontWeight: "700",
       color: "#f0f9ff",
@@ -544,7 +484,7 @@ function Leaderboard({ onUserClick, goBack }) {
 
 
   // ============================================================================
-  // RENDER: Scores Table
+  // RENDER: Scores Table (All Time, Today, Week, Month)
   // ============================================================================
   const renderScoresTable = (headerColumns, gridTemplate) => {
     return (
@@ -562,9 +502,6 @@ function Leaderboard({ onUserClick, goBack }) {
           const username =
             usernames[entry.user_id] ||
             `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
-          const userLevel = userLevels[entry.user_id] || "A0";
-          const masteredCount = userMasteredCounts[entry.user_id] || 
-            (activeTab === "words" ? entry.wordsMastered : 0);
           const displayScore =
             activeTab === "bestScore" ? entry.highestScore : entry.totalScore;
 
@@ -584,7 +521,6 @@ function Leaderboard({ onUserClick, goBack }) {
               }}
             >
               <div style={styles.rank}>{getMedalEmoji(index)}</div>
-              <div style={styles.levelBadge}>{userLevel}</div>
               <h3
                 style={styles.username}
                 onClick={(e) => {
@@ -595,13 +531,20 @@ function Leaderboard({ onUserClick, goBack }) {
                 {username}
               </h3>
               {activeTab === "words" && (
-                <div style={styles.statValue}>{entry.wordsMastered}</div>
-              )}
-              {activeTab !== "words" && (
                 <>
-                  <div style={styles.statValue}>{masteredCount}</div>
+                  <div style={styles.statValue}>{entry.wordsMastered}</div>
+                  <div style={styles.statValue}>{entry.totalWords}</div>
+                </>
+              )}
+              {activeTab === "bestScore" && (
+                <>
+                  <div style={styles.statValue}>{entry.maxCorrectAnswers || "—"}</div>
+                  <div style={styles.statValue}>{entry.bestLevel || "—"}</div>
                   <div style={styles.statValue}>{displayScore?.toLocaleString()}</div>
                 </>
+              )}
+              {(activeTab === "allTime" || activeTab === "today" || activeTab === "thisWeek" || activeTab === "thisMonth") && activeTab !== "bestScore" && (
+                <div style={styles.statValue}>{displayScore?.toLocaleString()}</div>
               )}
             </div>
           );
@@ -810,9 +753,11 @@ function Leaderboard({ onUserClick, goBack }) {
             No scores yet. Be the first to play! 🎮
           </div>
         ) : activeTab === "words" ? (
-          renderScoresTable(["", "", "Player", "Words"], "20px 30px 1fr 60px")
+          renderScoresTable(["", "Player", "Mastered", "Total"], "20px 1fr 70px 70px")
+        ) : activeTab === "bestScore" ? (
+          renderScoresTable(["", "Player", "Correct", "Level", "Best Score"], "20px 1fr 70px 50px 80px")
         ) : (
-          renderScoresTable(["", "", "Player", "Words", "Score"], "20px 30px 1fr 60px 80px")
+          renderScoresTable(["", "Player", "Score"], "20px 1fr 80px")
         )}
       </div>
     </div>
