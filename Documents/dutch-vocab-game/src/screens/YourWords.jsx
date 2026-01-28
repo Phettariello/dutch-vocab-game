@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
 
+
 function YourWords({ goBack }) {
   const [words, setWords] = useState([]);
   const [filteredWords, setFilteredWords] = useState([]);
@@ -15,12 +16,14 @@ function YourWords({ goBack }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
 
+
   // Stats states
   const [stats, setStats] = useState({
     total: 0,
     mastered: 0,
     accuracy: 0,
   });
+
 
 
   // ============================================================================
@@ -34,11 +37,13 @@ function YourWords({ goBack }) {
         const userId = userData.user?.id;
 
 
+
         if (!userId) {
           alert("You must be logged in.");
           goBack();
           return;
         }
+
 
 
         // 1. Fetch user_progress with word details
@@ -48,7 +53,9 @@ function YourWords({ goBack }) {
           .eq("user_id", userId);
 
 
+
         if (progressError) throw progressError;
+
 
 
         // 2. Fetch word details for each progress entry
@@ -64,8 +71,36 @@ function YourWords({ goBack }) {
         );
 
 
-        // 3. Calculate mastery percent for each word
-        const withPercentage = (progressWithWords || []).map((p) => {
+
+        // 3. GROUP BY word_id and SUM correct/incorrect counts
+        const groupedByWord = {};
+        (progressWithWords || []).forEach((entry) => {
+          const wordId = entry.word_id;
+          if (!groupedByWord[wordId]) {
+            groupedByWord[wordId] = {
+              word_id: wordId,
+              words: entry.words,
+              correct_count: 0,
+              incorrect_count: 0,
+              mastered: entry.mastered,
+              // Use the most recent ID for React key
+              id: entry.id,
+            };
+          }
+          // Sum the counts
+          groupedByWord[wordId].correct_count += entry.correct_count || 0;
+          groupedByWord[wordId].incorrect_count += entry.incorrect_count || 0;
+          // If any entry for this word is mastered, mark as mastered
+          groupedByWord[wordId].mastered =
+            groupedByWord[wordId].mastered || entry.mastered;
+        });
+
+        const aggregatedWords = Object.values(groupedByWord);
+
+
+
+        // 4. Calculate mastery percent for each word
+        const withPercentage = (aggregatedWords || []).map((p) => {
           const total = p.correct_count + p.incorrect_count;
           const masteryPercent =
             total > 0
@@ -75,7 +110,8 @@ function YourWords({ goBack }) {
         });
 
 
-        // 4. Extract unique categories and initialize all as selected
+
+        // 5. Extract unique categories and initialize all as selected
         const uniqueCategories = [
           ...new Set(withPercentage.map((p) => p.words.category)),
         ].sort();
@@ -83,11 +119,13 @@ function YourWords({ goBack }) {
         setSelectedCategories(new Set(uniqueCategories));
 
 
-        // 5. Initialize all difficulties (1-10) as selected
+
+        // 6. Initialize all difficulties (1-10) as selected
         setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
 
 
-        // 6. Calculate overall stats
+
+        // 7. Calculate overall stats
         const mastered = withPercentage.filter((w) => w.mastered).length;
         const totalCorrect = withPercentage.reduce(
           (sum, w) => sum + w.correct_count,
@@ -100,11 +138,13 @@ function YourWords({ goBack }) {
             : 0;
 
 
+
         setStats({
           total: withPercentage.length,
           mastered,
           accuracy,
         });
+
 
 
         setWords(withPercentage);
@@ -118,8 +158,10 @@ function YourWords({ goBack }) {
     };
 
 
+
     fetchWords();
   }, []);
+
 
 
   // ============================================================================
@@ -127,6 +169,7 @@ function YourWords({ goBack }) {
   // ============================================================================
   useEffect(() => {
     let filtered = words;
+
 
 
     // Search filter (English or Dutch)
@@ -140,6 +183,7 @@ function YourWords({ goBack }) {
     }
 
 
+
     // Category filter
     if (selectedCategories.size > 0) {
       filtered = filtered.filter((w) =>
@@ -148,12 +192,14 @@ function YourWords({ goBack }) {
     }
 
 
+
     // Difficulty filter
     if (selectedDifficulties.size > 0) {
       filtered = filtered.filter((w) =>
         selectedDifficulties.has(w.words.difficulty)
       );
     }
+
 
 
     // Sort: 
@@ -171,8 +217,10 @@ function YourWords({ goBack }) {
     });
 
 
+
     setFilteredWords(filtered);
   }, [searchQuery, selectedCategories, selectedDifficulties, words]);
+
 
 
   // ============================================================================
@@ -189,6 +237,7 @@ function YourWords({ goBack }) {
   };
 
 
+
   // ============================================================================
   // FUNCTION: Select All/Deselect All categories
   // ============================================================================
@@ -199,6 +248,7 @@ function YourWords({ goBack }) {
       setSelectedCategories(new Set(categories));
     }
   };
+
 
 
   // ============================================================================
@@ -215,6 +265,7 @@ function YourWords({ goBack }) {
   };
 
 
+
   // ============================================================================
   // FUNCTION: Select All/Deselect All difficulties
   // ============================================================================
@@ -225,6 +276,7 @@ function YourWords({ goBack }) {
       setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
     }
   };
+
 
 
   // ============================================================================
@@ -243,6 +295,7 @@ function YourWords({ goBack }) {
       </div>
     );
   }
+
 
 
   // ============================================================================
@@ -270,6 +323,7 @@ function YourWords({ goBack }) {
       </div>
 
 
+
       {/* STATS GRID - 3 COLUMNS */}
       <div style={styles.statsContainer}>
         <div style={styles.statCard}>
@@ -287,6 +341,7 @@ function YourWords({ goBack }) {
       </div>
 
 
+
       {/* SEARCH BAR */}
       <div style={styles.searchContainer}>
         <input
@@ -299,6 +354,7 @@ function YourWords({ goBack }) {
       </div>
 
 
+
       {/* FILTERS TOGGLE */}
       <div style={styles.filtersPanel}>
         <button
@@ -307,6 +363,7 @@ function YourWords({ goBack }) {
         >
           🔧 Filters {filtersOpen ? "▼" : "▶"}
         </button>
+
 
 
         {filtersOpen && (
@@ -340,6 +397,7 @@ function YourWords({ goBack }) {
             </div>
 
 
+
             {/* Difficulty */}
             <div style={styles.filterGroup}>
               <div style={styles.filterHeader}>
@@ -370,6 +428,7 @@ function YourWords({ goBack }) {
       </div>
 
 
+
       {/* WORDS LIST */}
       <div style={styles.contentContainer}>
         {filteredWords.length === 0 ? (
@@ -388,6 +447,7 @@ function YourWords({ goBack }) {
               <div style={styles.colIncorrect}>❌</div>
               <div style={styles.colLevel}>Level</div>
             </div>
+
 
 
             {/* Table Rows */}
@@ -421,6 +481,7 @@ function YourWords({ goBack }) {
             </div>
 
 
+
             {/* Results counter */}
             <div style={styles.resultCounter}>
               Showing {filteredWords.length} of {stats.total} words
@@ -431,6 +492,7 @@ function YourWords({ goBack }) {
     </div>
   );
 }
+
 
 
 // ============================================================================
@@ -736,6 +798,7 @@ const styles = {
     fontWeight: "500",
   },
 };
+
 
 
 export default YourWords;
