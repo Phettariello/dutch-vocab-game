@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
+
 function Achievements({ goBack, userId }) {
   const [stats, setStats] = useState({
     totalGames: 0,
@@ -13,15 +14,20 @@ function Achievements({ goBack, userId }) {
     levelName: "Beginner",
     levelProgress: 0,
     wordsNeeded: 500,
+    totalGameTime: 0,
     totalWeeklyGold: 0,
     totalWeeklySilver: 0,
     totalWeeklyBronze: 0,
     totalMonthlyGold: 0,
     totalMonthlySilver: 0,
     totalMonthlyBronze: 0,
+    totalDailyGold: 0,
+    totalDailySilver: 0,
+    totalDailyBronze: 0,
   });
   const [loading, setLoading] = useState(true);
   const [topResults, setTopResults] = useState([]);
+
 
   // ============================================================================
   // FUNCTION: Calculate user level based on words mastered
@@ -36,20 +42,23 @@ function Achievements({ goBack, userId }) {
       { code: "C2", name: "Mastery", min: 2501, max: 3000 },
     ];
 
+
     let currentLevel = levels[0];
     let nextLevel = levels[1] || levels[0];
     let progress = 0;
+
 
     for (let i = 0; i < levels.length; i++) {
       if (wordsMastered >= levels[i].min && wordsMastered <= levels[i].max) {
         currentLevel = levels[i];
         nextLevel = levels[i + 1] || levels[i];
-        const rangeSize = currentLevel.max - currentLevel.min + 1;
+        const rangeSize = currentLevel.max - currentLevel.min;
         const wordsInRange = wordsMastered - currentLevel.min;
         progress = (wordsInRange / rangeSize) * 100;
         break;
       }
     }
+
 
     // If mastered >= 3000, set to C2
     if (wordsMastered >= 3000) {
@@ -58,7 +67,9 @@ function Achievements({ goBack, userId }) {
       progress = 100;
     }
 
+
     const wordsNeeded = nextLevel.max;
+
 
     return {
       userLevel: currentLevel.code,
@@ -67,6 +78,23 @@ function Achievements({ goBack, userId }) {
       wordsNeeded: wordsNeeded,
     };
   };
+
+
+  // ============================================================================
+  // FUNCTION: Convert seconds to readable format
+  // ============================================================================
+  const formatGameTime = (seconds) => {
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+      const minutes = Math.round(seconds / 60);
+      return `${minutes}m`;
+    } else {
+      const hours = Math.round(seconds / 3600);
+      return `${hours}h`;
+    }
+  };
+
 
   // ============================================================================
   // EFFECT: Fetch all achievements data
@@ -79,6 +107,7 @@ function Achievements({ goBack, userId }) {
     }
   }, [userId]);
 
+
   const fetchAchievements = async () => {
     setLoading(true);
     try {
@@ -89,11 +118,13 @@ function Achievements({ goBack, userId }) {
         .eq("user_id", userId)
         .order("score", { ascending: false });
 
+
       // 2. Fetch user word progress (mastered words)
       const { data: progressData } = await supabase
         .from("user_progress")
         .select("*")
         .eq("user_id", userId);
+
 
       // 3. Fetch weekly medals
       const { data: weeklyMedals } = await supabase
@@ -101,11 +132,20 @@ function Achievements({ goBack, userId }) {
         .select("medal_type")
         .eq("user_id", userId);
 
+
       // 4. Fetch monthly medals
       const { data: monthlyMedals } = await supabase
         .from("monthly_medals")
         .select("medal_type")
         .eq("user_id", userId);
+
+
+      // 5. Fetch daily medals
+      const { data: dailyMedals } = await supabase
+        .from("daily_medals")
+        .select("medal_type")
+        .eq("user_id", userId);
+
 
       // Calculate statistics
       const totalGames = sessions?.length || 0;
@@ -115,16 +155,22 @@ function Achievements({ goBack, userId }) {
       const maxCorrectAnswers = Math.max(
         ...(sessions?.map((s) => s.correct_answers || 0) || [0])
       );
+      const totalGameTime = sessions?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
+
 
       // Words mastered (where mastered = true)
       const wordsMastered = progressData?.filter((w) => w.mastered).length || 0;
 
+
       // Calculate user level
       const levelInfo = calculateUserLevel(wordsMastered);
+
 
       // Count medals
       let weeklyCount = { gold: 0, silver: 0, bronze: 0 };
       let monthlyCount = { gold: 0, silver: 0, bronze: 0 };
+      let dailyCount = { gold: 0, silver: 0, bronze: 0 };
+
 
       weeklyMedals?.forEach((m) => {
         weeklyCount[m.medal_type]++;
@@ -132,6 +178,10 @@ function Achievements({ goBack, userId }) {
       monthlyMedals?.forEach((m) => {
         monthlyCount[m.medal_type]++;
       });
+      dailyMedals?.forEach((m) => {
+        dailyCount[m.medal_type]++;
+      });
+
 
       setStats({
         totalGames,
@@ -140,6 +190,7 @@ function Achievements({ goBack, userId }) {
         bestLevel,
         maxCorrectAnswers,
         wordsMastered,
+        totalGameTime,
         ...levelInfo,
         totalWeeklyGold: weeklyCount.gold,
         totalWeeklySilver: weeklyCount.silver,
@@ -147,7 +198,11 @@ function Achievements({ goBack, userId }) {
         totalMonthlyGold: monthlyCount.gold,
         totalMonthlySilver: monthlyCount.silver,
         totalMonthlyBronze: monthlyCount.bronze,
+        totalDailyGold: dailyCount.gold,
+        totalDailySilver: dailyCount.silver,
+        totalDailyBronze: dailyCount.bronze,
       });
+
 
       // Top 10 results
       if (sessions && sessions.length > 0) {
@@ -164,6 +219,7 @@ function Achievements({ goBack, userId }) {
       setLoading(false);
     }
   };
+
 
   const styles = {
     container: {
@@ -290,15 +346,15 @@ function Achievements({ goBack, userId }) {
     },
     statGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-      gap: "12px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))",
+      gap: "10px",
       marginBottom: "16px",
     },
     statCard: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "10px",
-      padding: "12px",
+      borderRadius: "8px",
+      padding: "10px",
       textAlign: "center",
       color: "white",
       boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
@@ -307,17 +363,18 @@ function Achievements({ goBack, userId }) {
       justifyContent: "center",
     },
     statValue: {
-      fontSize: "clamp(18px, 4vw, 24px)",
+      fontSize: "clamp(16px, 3.5vw, 20px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      margin: "0 0 4px 0",
+      margin: "0 0 2px 0",
     },
     statLabel: {
-      fontSize: "clamp(10px, 2vw, 12px)",
+      fontSize: "clamp(9px, 1.8vw, 10px)",
       color: "#bfdbfe",
       margin: 0,
       textTransform: "uppercase",
       fontWeight: "600",
+      lineHeight: "1.2",
     },
     medalSection: {
       background: "rgba(6,182,212,0.08)",
@@ -421,6 +478,7 @@ function Achievements({ goBack, userId }) {
     },
   };
 
+
   if (!userId) {
     return (
       <div style={styles.container}>
@@ -448,6 +506,7 @@ function Achievements({ goBack, userId }) {
     );
   }
 
+
   return (
     <div style={styles.container}>
       {/* HEADER - STICKY */}
@@ -468,6 +527,7 @@ function Achievements({ goBack, userId }) {
           ← Menu
         </button>
       </div>
+
 
       {/* CONTENT */}
       <div style={styles.contentContainer}>
@@ -503,6 +563,7 @@ function Achievements({ goBack, userId }) {
               </div>
             </div>
 
+
             {/* STATISTICS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>📊 Your Statistics</h2>
@@ -531,8 +592,13 @@ function Achievements({ goBack, userId }) {
                   <p style={styles.statValue}>{stats.wordsMastered}</p>
                   <p style={styles.statLabel}>Words Mastered</p>
                 </div>
+                <div style={styles.statCard}>
+                  <p style={styles.statValue}>{formatGameTime(stats.totalGameTime)}</p>
+                  <p style={styles.statLabel}>Game Time</p>
+                </div>
               </div>
             </div>
+
 
             {/* TOP RESULTS */}
             {topResults.length > 0 && (
@@ -557,9 +623,34 @@ function Achievements({ goBack, userId }) {
               </div>
             )}
 
+
             {/* MEDALS */}
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>🥇 Medals Earned</h2>
+
+
+              {/* Daily Medals */}
+              <div style={styles.medalSection}>
+                <p style={styles.medalSectionTitle}>☀️ Daily Medals</p>
+                <div style={styles.medalRow}>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥇</div>
+                    <p style={styles.medalCount}>{stats.totalDailyGold}</p>
+                    <p style={styles.medalLabel}>Gold</p>
+                  </div>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥈</div>
+                    <p style={styles.medalCount}>{stats.totalDailySilver}</p>
+                    <p style={styles.medalLabel}>Silver</p>
+                  </div>
+                  <div style={styles.medalCard}>
+                    <div style={styles.medalEmoji}>🥉</div>
+                    <p style={styles.medalCount}>{stats.totalDailyBronze}</p>
+                    <p style={styles.medalLabel}>Bronze</p>
+                  </div>
+                </div>
+              </div>
+
 
               {/* Weekly Medals */}
               <div style={styles.medalSection}>
@@ -582,6 +673,7 @@ function Achievements({ goBack, userId }) {
                   </div>
                 </div>
               </div>
+
 
               {/* Monthly Medals */}
               <div style={styles.medalSection}>
@@ -606,6 +698,7 @@ function Achievements({ goBack, userId }) {
               </div>
             </div>
 
+
             {topResults.length === 0 && !loading && (
               <div style={styles.emptyState}>
                 <p>No game sessions yet. Start playing to see your results! 🎮</p>
@@ -617,5 +710,6 @@ function Achievements({ goBack, userId }) {
     </div>
   );
 }
+
 
 export default Achievements;
