@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
+
 function YourWords({ goBack }) {
   const [words, setWords] = useState([]);
   const [filteredWords, setFilteredWords] = useState([]);
@@ -13,12 +14,14 @@ function YourWords({ goBack }) {
   const [categories, setCategories] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+
   // Stats states
   const [stats, setStats] = useState({
     total: 0,
     mastered: 0,
     accuracy: 0,
   });
+
 
   // ============================================================================
   // EFFECT: Load words with progress and calculate stats
@@ -30,11 +33,13 @@ function YourWords({ goBack }) {
         const { data: userData } = await supabase.auth.getUser();
         const userId = userData.user?.id;
 
+
         if (!userId) {
           alert("You must be logged in.");
           goBack();
           return;
         }
+
 
         // 1. Fetch user_progress with word details
         const { data: progressData, error: progressError } = await supabase
@@ -42,7 +47,9 @@ function YourWords({ goBack }) {
           .select("*")
           .eq("user_id", userId);
 
+
         if (progressError) throw progressError;
+
 
         // 2. Fetch word details for each progress entry
         const progressWithWords = await Promise.all(
@@ -56,6 +63,7 @@ function YourWords({ goBack }) {
           })
         );
 
+
         // 3. Calculate mastery percent for each word
         const withPercentage = (progressWithWords || []).map((p) => {
           const total = p.correct_count + p.incorrect_count;
@@ -66,6 +74,7 @@ function YourWords({ goBack }) {
           return { ...p, masteryPercent, total };
         });
 
+
         // 4. Extract unique categories and initialize all as selected
         const uniqueCategories = [
           ...new Set(withPercentage.map((p) => p.words.category)),
@@ -73,8 +82,10 @@ function YourWords({ goBack }) {
         setCategories(uniqueCategories);
         setSelectedCategories(new Set(uniqueCategories));
 
+
         // 5. Initialize all difficulties (1-10) as selected
         setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+
 
         // 6. Calculate overall stats
         const mastered = withPercentage.filter((w) => w.mastered).length;
@@ -88,11 +99,13 @@ function YourWords({ goBack }) {
             ? Math.round((totalCorrect / totalAttempts) * 100)
             : 0;
 
+
         setStats({
           total: withPercentage.length,
           mastered,
           accuracy,
         });
+
 
         setWords(withPercentage);
         setFilteredWords(withPercentage);
@@ -104,14 +117,17 @@ function YourWords({ goBack }) {
       }
     };
 
+
     fetchWords();
   }, []);
+
 
   // ============================================================================
   // EFFECT: Apply filters and sorting
   // ============================================================================
   useEffect(() => {
     let filtered = words;
+
 
     // Search filter (English or Dutch)
     if (searchQuery.trim()) {
@@ -123,6 +139,7 @@ function YourWords({ goBack }) {
       );
     }
 
+
     // Category filter
     if (selectedCategories.size > 0) {
       filtered = filtered.filter((w) =>
@@ -130,12 +147,14 @@ function YourWords({ goBack }) {
       );
     }
 
+
     // Difficulty filter
     if (selectedDifficulties.size > 0) {
       filtered = filtered.filter((w) =>
         selectedDifficulties.has(w.words.difficulty)
       );
     }
+
 
     // Sort: 
     // 1. Mastery % ascendente (più difficili prima)
@@ -151,8 +170,10 @@ function YourWords({ goBack }) {
       return a.correct_count - b.correct_count;
     });
 
+
     setFilteredWords(filtered);
   }, [searchQuery, selectedCategories, selectedDifficulties, words]);
+
 
   // ============================================================================
   // FUNCTION: Toggle category checkbox
@@ -167,6 +188,7 @@ function YourWords({ goBack }) {
     setSelectedCategories(newSet);
   };
 
+
   // ============================================================================
   // FUNCTION: Select All/Deselect All categories
   // ============================================================================
@@ -177,6 +199,7 @@ function YourWords({ goBack }) {
       setSelectedCategories(new Set(categories));
     }
   };
+
 
   // ============================================================================
   // FUNCTION: Toggle difficulty checkbox
@@ -191,6 +214,7 @@ function YourWords({ goBack }) {
     setSelectedDifficulties(newSet);
   };
 
+
   // ============================================================================
   // FUNCTION: Select All/Deselect All difficulties
   // ============================================================================
@@ -201,6 +225,7 @@ function YourWords({ goBack }) {
       setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
     }
   };
+
 
   // ============================================================================
   // LOADING STATE
@@ -218,6 +243,7 @@ function YourWords({ goBack }) {
       </div>
     );
   }
+
 
   // ============================================================================
   // MAIN RENDER
@@ -243,6 +269,7 @@ function YourWords({ goBack }) {
         </button>
       </div>
 
+
       {/* STATS GRID - 3 COLUMNS */}
       <div style={styles.statsContainer}>
         <div style={styles.statCard}>
@@ -259,6 +286,7 @@ function YourWords({ goBack }) {
         </div>
       </div>
 
+
       {/* SEARCH BAR */}
       <div style={styles.searchContainer}>
         <input
@@ -270,6 +298,7 @@ function YourWords({ goBack }) {
         />
       </div>
 
+
       {/* FILTERS TOGGLE */}
       <div style={styles.filtersPanel}>
         <button
@@ -278,6 +307,7 @@ function YourWords({ goBack }) {
         >
           🔧 Filters {filtersOpen ? "▼" : "▶"}
         </button>
+
 
         {filtersOpen && (
           <div style={styles.filtersContent}>
@@ -309,6 +339,7 @@ function YourWords({ goBack }) {
               </div>
             </div>
 
+
             {/* Difficulty */}
             <div style={styles.filterGroup}>
               <div style={styles.filterHeader}>
@@ -338,6 +369,7 @@ function YourWords({ goBack }) {
         )}
       </div>
 
+
       {/* WORDS LIST */}
       <div style={styles.contentContainer}>
         {filteredWords.length === 0 ? (
@@ -354,9 +386,9 @@ function YourWords({ goBack }) {
               <div style={styles.colMastery}>Mastery</div>
               <div style={styles.colCorrect}>✅</div>
               <div style={styles.colIncorrect}>❌</div>
-              <div style={styles.colCategory}>Category</div>
               <div style={styles.colLevel}>Level</div>
             </div>
+
 
             {/* Table Rows */}
             <div style={styles.tableBody}>
@@ -383,11 +415,11 @@ function YourWords({ goBack }) {
                   <div style={styles.colIncorrect}>
                     {progress.incorrect_count}
                   </div>
-                  <div style={styles.colCategory}>{progress.words.category}</div>
                   <div style={styles.colLevel}>{progress.words.difficulty}</div>
                 </div>
               ))}
             </div>
+
 
             {/* Results counter */}
             <div style={styles.resultCounter}>
@@ -399,6 +431,7 @@ function YourWords({ goBack }) {
     </div>
   );
 }
+
 
 // ============================================================================
 // STYLES - MOBILE OPTIMIZED
@@ -602,7 +635,7 @@ const styles = {
   },
   tableHeader: {
     display: "grid",
-    gridTemplateColumns: "1.2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 0.8fr",
+    gridTemplateColumns: "2fr 2fr 1.2fr 0.9fr 0.9fr 0.9fr",
     gap: "8px",
     padding: "12px",
     background: "rgba(6,182,212,0.1)",
@@ -623,7 +656,7 @@ const styles = {
   },
   tableRow: {
     display: "grid",
-    gridTemplateColumns: "1.2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 0.8fr",
+    gridTemplateColumns: "2fr 2fr 1.2fr 0.9fr 0.9fr 0.9fr",
     gap: "8px",
     padding: "12px",
     background: "linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(124, 58, 237, 0.3) 100%)",
@@ -633,14 +666,21 @@ const styles = {
     fontSize: "clamp(11px, 2.5vw, 13px)",
     color: "#bfdbfe",
     transition: "all 0.2s ease",
+    overflow: "hidden",
   },
   colEnglish: {
     fontWeight: "600",
     color: "#f0f9ff",
     wordBreak: "break-word",
+    whiteSpace: "normal",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   colDutch: {
     wordBreak: "break-word",
+    whiteSpace: "normal",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   colMastery: {
     display: "flex",
@@ -655,22 +695,22 @@ const styles = {
     color: "white",
     minWidth: "45px",
     textAlign: "center",
+    whiteSpace: "nowrap",
   },
   colCorrect: {
     textAlign: "center",
     fontWeight: "600",
+    whiteSpace: "nowrap",
   },
   colIncorrect: {
     textAlign: "center",
     fontWeight: "600",
-  },
-  colCategory: {
-    textAlign: "center",
-    fontSize: "clamp(10px, 2vw, 11px)",
+    whiteSpace: "nowrap",
   },
   colLevel: {
     textAlign: "center",
     fontWeight: "600",
+    whiteSpace: "nowrap",
   },
   emptyState: {
     textAlign: "center",
@@ -696,5 +736,6 @@ const styles = {
     fontWeight: "500",
   },
 };
+
 
 export default YourWords;
