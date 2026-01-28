@@ -14,7 +14,6 @@ function Achievements({ goBack, userId }) {
     levelName: "Beginner",
     levelProgress: 0,
     wordsNeeded: 500,
-    totalGameTime: 0,
     totalWeeklyGold: 0,
     totalWeeklySilver: 0,
     totalWeeklyBronze: 0,
@@ -52,7 +51,7 @@ function Achievements({ goBack, userId }) {
       if (wordsMastered >= levels[i].min && wordsMastered <= levels[i].max) {
         currentLevel = levels[i];
         nextLevel = levels[i + 1] || levels[i];
-        const rangeSize = currentLevel.max - currentLevel.min;
+        const rangeSize = nextLevel.max - currentLevel.min;
         const wordsInRange = wordsMastered - currentLevel.min;
         progress = (wordsInRange / rangeSize) * 100;
         break;
@@ -68,7 +67,7 @@ function Achievements({ goBack, userId }) {
     }
 
 
-    const wordsNeeded = nextLevel.max;
+    const wordsNeeded = nextLevel.max - currentLevel.min;
 
 
     return {
@@ -77,22 +76,6 @@ function Achievements({ goBack, userId }) {
       levelProgress: progress,
       wordsNeeded: wordsNeeded,
     };
-  };
-
-
-  // ============================================================================
-  // FUNCTION: Convert seconds to readable format
-  // ============================================================================
-  const formatGameTime = (seconds) => {
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    } else if (seconds < 3600) {
-      const minutes = Math.round(seconds / 60);
-      return `${minutes}m`;
-    } else {
-      const hours = Math.round(seconds / 3600);
-      return `${hours}h`;
-    }
   };
 
 
@@ -155,7 +138,6 @@ function Achievements({ goBack, userId }) {
       const maxCorrectAnswers = Math.max(
         ...(sessions?.map((s) => s.correct_answers || 0) || [0])
       );
-      const totalGameTime = sessions?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
 
 
       // Words mastered (where mastered = true)
@@ -190,7 +172,6 @@ function Achievements({ goBack, userId }) {
         bestLevel,
         maxCorrectAnswers,
         wordsMastered,
-        totalGameTime,
         ...levelInfo,
         totalWeeklyGold: weeklyCount.gold,
         totalWeeklySilver: weeklyCount.silver,
@@ -346,35 +327,36 @@ function Achievements({ goBack, userId }) {
     },
     statGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))",
-      gap: "10px",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: "12px",
       marginBottom: "16px",
     },
     statCard: {
       background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
       border: "1px solid rgba(6,182,212,0.2)",
       borderRadius: "8px",
-      padding: "10px",
+      padding: "12px",
       textAlign: "center",
       color: "white",
       boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
       display: "flex",
       flexDirection: "column",
       justifyContent: "center",
+      minHeight: "80px",
     },
     statValue: {
-      fontSize: "clamp(16px, 3.5vw, 20px)",
+      fontSize: "clamp(18px, 4vw, 22px)",
       fontWeight: "bold",
       color: "#fbbf24",
-      margin: "0 0 2px 0",
+      margin: "0 0 4px 0",
     },
     statLabel: {
-      fontSize: "clamp(9px, 1.8vw, 10px)",
+      fontSize: "clamp(10px, 2vw, 11px)",
       color: "#bfdbfe",
       margin: 0,
       textTransform: "uppercase",
       fontWeight: "600",
-      lineHeight: "1.2",
+      lineHeight: "1.3",
     },
     medalSection: {
       background: "rgba(6,182,212,0.08)",
@@ -591,10 +573,6 @@ function Achievements({ goBack, userId }) {
                 <div style={styles.statCard}>
                   <p style={styles.statValue}>{stats.wordsMastered}</p>
                   <p style={styles.statLabel}>Words Mastered</p>
-                </div>
-                <div style={styles.statCard}>
-                  <p style={styles.statValue}>{formatGameTime(stats.totalGameTime)}</p>
-                  <p style={styles.statLabel}>Game Time</p>
                 </div>
               </div>
             </div>
