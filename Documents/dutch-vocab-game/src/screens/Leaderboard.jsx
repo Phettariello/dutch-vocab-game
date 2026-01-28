@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 
 
+
 function Leaderboard({ onUserClick, goBack }) {
   const [activeTab, setActiveTab] = useState("allTime");
   const [leaderboard, setLeaderboard] = useState([]);
@@ -9,6 +10,7 @@ function Leaderboard({ onUserClick, goBack }) {
   const [usernames, setUsernames] = useState({});
   const [medalLeaderboard, setMedalLeaderboard] = useState([]);
   const [medalType, setMedalType] = useState("daily");
+
 
 
   // ============================================================================
@@ -25,6 +27,7 @@ function Leaderboard({ onUserClick, goBack }) {
   }, [activeTab, medalType]);
 
 
+
   // ============================================================================
   // FUNCTION: Get date range start
   // ============================================================================
@@ -35,6 +38,7 @@ function Leaderboard({ onUserClick, goBack }) {
     const day = String(now.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}T00:00:00+00:00`;
   };
+
 
   const getWeekStart = () => {
     const now = new Date();
@@ -49,6 +53,7 @@ function Leaderboard({ onUserClick, goBack }) {
     return `${year}-${month}-${day}T00:00:00+00:00`;
   };
 
+
   const getMonthStart = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -57,17 +62,20 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   // ============================================================================
   // FUNCTION: Award medals to top 3 users
   // ============================================================================
   const awardMedals = async (table, topUsers) => {
     if (topUsers.length === 0) return;
 
+
     const medals = [
       { user_id: topUsers[0]?.user_id, medal_type: "gold" },
       { user_id: topUsers[1]?.user_id, medal_type: "silver" },
       { user_id: topUsers[2]?.user_id, medal_type: "bronze" },
     ].filter((m) => m.user_id);
+
 
     for (const medal of medals) {
       const { data: existing } = await supabase
@@ -76,6 +84,7 @@ function Leaderboard({ onUserClick, goBack }) {
         .eq("user_id", medal.user_id)
         .eq("medal_type", medal.medal_type)
         .single();
+
 
       if (!existing) {
         await supabase.from(table).insert({
@@ -88,6 +97,7 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   // ============================================================================
   // FUNCTION: Fetch leaderboard data (scores)
   // ============================================================================
@@ -95,6 +105,7 @@ function Leaderboard({ onUserClick, goBack }) {
     setLoading(true);
     try {
       let query = supabase.from("sessions").select("*");
+
 
       if (activeTab === "today") {
         const todayStart = getTodayStart();
@@ -107,7 +118,9 @@ function Leaderboard({ onUserClick, goBack }) {
         query = query.gte("created_at", monthStart);
       }
 
+
       const { data } = await query.order("score", { ascending: false });
+
 
       const userStats = {};
       data?.forEach((session) => {
@@ -138,13 +151,16 @@ function Leaderboard({ onUserClick, goBack }) {
         }
       });
 
+
       let leaderboardData = Object.values(userStats);
+
 
       if (activeTab === "bestScore") {
         leaderboardData.sort((a, b) => b.highestScore - a.highestScore);
       } else {
         leaderboardData.sort((a, b) => b.totalScore - a.totalScore);
       }
+
 
       // Award medals for today/week/month
       if (activeTab === "today") {
@@ -158,7 +174,9 @@ function Leaderboard({ onUserClick, goBack }) {
         await awardMedals("monthly_medals", topMonth);
       }
 
+
       leaderboardData = leaderboardData.slice(0, 10);
+
 
       const userIds = leaderboardData.map((entry) => entry.user_id);
       const { data: profilesData } = await supabase
@@ -166,10 +184,12 @@ function Leaderboard({ onUserClick, goBack }) {
         .select("user_id, username")
         .in("user_id", userIds);
 
+
       const usernamesMap = {};
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
+
 
       setUsernames(usernamesMap);
       setLeaderboard(leaderboardData);
@@ -181,63 +201,104 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   // ============================================================================
-  // FUNCTION: Fetch words leaderboard
+  // FUNCTION: Fetch words leaderboard (FIXED - aggregated by word_id)
   // ============================================================================
   const fetchWordsLeaderboard = async () => {
     setLoading(true);
     try {
       const { data: progressData } = await supabase
         .from("user_progress")
-        .select("user_id, mastered");
+        .select("user_id, word_id, mastered, correct_count, incorrect_count");
 
-      const wordsCounts = {};
+
+      // ========================
+      // STEP 1: Aggregate by word_id PER USER
+      // (same logic as YourWords.jsx)
+      // ========================
+      const userWordStats = {};
+      
       progressData?.forEach((progress) => {
-        if (!wordsCounts[progress.user_id]) {
-          wordsCounts[progress.user_id] = 0;
+        const userId = progress.user_id;
+        const wordId = progress.word_id;
+        
+        if (!userWordStats[userId]) {
+          userWordStats[userId] = {};
         }
-        if (progress.mastered) {
-          wordsCounts[progress.user_id]++;
+        
+        if (!userWordStats[userId][wordId]) {
+          userWordStats[userId][wordId] = {
+            word_id: wordId,
+            correct_count: 0,
+            incorrect_count: 0,
+            mastered: false,
+          };
         }
+        
+        // Sum counts
+        userWordStats[userId][wordId].correct_count += progress.correct_count || 0;
+        userWordStats[userId][wordId].incorrect_count += progress.incorrect_count || 0;
+        
+        // Mark as mastered if any entry is mastered
+        userWordStats[userId][wordId].mastered = userWordStats[userId][wordId].mastered || progress.mastered;
       });
 
-      // Count total words per user (not all words in database)
-      const totalWordsByUser = {};
-      progressData?.forEach((progress) => {
-        if (!totalWordsByUser[progress.user_id]) {
-          totalWordsByUser[progress.user_id] = 0;
-        }
-        totalWordsByUser[progress.user_id]++;
+
+
+      // ========================
+      // STEP 2: Count mastered & total UNIQUE WORDS per user
+      // ========================
+      const leaderboardData = Object.keys(userWordStats).map((userId) => {
+        const wordsForUser = Object.values(userWordStats[userId]);
+        
+        // Count UNIQUE mastered words
+        const wordsMastered = wordsForUser.filter((w) => w.mastered).length;
+        
+        // Count UNIQUE total words
+        const totalWords = wordsForUser.length;
+        
+        return {
+          user_id: userId,
+          wordsMastered,
+          totalWords,
+        };
       });
 
-      let leaderboardData = Object.keys(wordsCounts).map((userId) => ({
-        user_id: userId,
-        wordsMastered: wordsCounts[userId] || 0,
-        totalWords: totalWordsByUser[userId] || 0,
-      }));
 
+
+      // ========================
+      // STEP 3: Sort by mastered words DESC
+      // ========================
       leaderboardData.sort((a, b) => b.wordsMastered - a.wordsMastered);
-      leaderboardData = leaderboardData.slice(0, 10);
+      const top10 = leaderboardData.slice(0, 10);
 
-      const userIds = leaderboardData.map((entry) => entry.user_id);
+
+      // ========================
+      // STEP 4: Fetch usernames
+      // ========================
+      const userIds = top10.map((entry) => entry.user_id);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, username")
         .in("user_id", userIds);
+
 
       const usernamesMap = {};
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
 
+
       setUsernames(usernamesMap);
-      setLeaderboard(leaderboardData);
+      setLeaderboard(top10);
     } catch (error) {
       console.error("Error fetching words leaderboard:", error);
     } finally {
       setLoading(false);
     }
   };
+
 
 
   // ============================================================================
@@ -251,9 +312,11 @@ function Leaderboard({ onUserClick, goBack }) {
         medalType === "weekly" ? "weekly_medals" :
         "monthly_medals";
 
+
       const { data: medalData } = await supabase
         .from(table)
         .select("user_id, medal_type");
+
 
       const medalCounts = {};
       medalData?.forEach((medal) => {
@@ -263,16 +326,19 @@ function Leaderboard({ onUserClick, goBack }) {
         medalCounts[medal.user_id][medal.medal_type]++;
       });
 
+
       const userIds = Object.keys(medalCounts);
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("user_id, username")
         .in("user_id", userIds);
 
+
       const usernamesMap = {};
       profilesData?.forEach((profile) => {
         usernamesMap[profile.user_id] = profile.username;
       });
+
 
       let combined = userIds
         .map((userId) => {
@@ -287,6 +353,7 @@ function Leaderboard({ onUserClick, goBack }) {
         })
         .sort((a, b) => b.totalScore - a.totalScore);
 
+
       setMedalLeaderboard(combined);
     } catch (error) {
       console.error("Error fetching medal leaderboard:", error);
@@ -294,6 +361,7 @@ function Leaderboard({ onUserClick, goBack }) {
       setLoading(false);
     }
   };
+
 
 
   // ============================================================================
@@ -305,6 +373,7 @@ function Leaderboard({ onUserClick, goBack }) {
     if (rank === 2) return "🥉";
     return `#${rank + 1}`;
   };
+
 
 
   const styles = {
@@ -491,6 +560,7 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   // ============================================================================
   // RENDER: Scores Table (All Time, Today, Week, Month)
   // ============================================================================
@@ -506,12 +576,14 @@ function Leaderboard({ onUserClick, goBack }) {
           ))}
         </div>
 
+
         {leaderboard.map((entry, index) => {
           const username =
             usernames[entry.user_id] ||
             `Player ${entry.user_id.slice(0, 8).toUpperCase()}`;
           const displayScore =
             activeTab === "bestScore" ? entry.highestScore : entry.totalScore;
+
 
           return (
             <div
@@ -562,6 +634,7 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   // ============================================================================
   // RENDER: Medals Table
   // ============================================================================
@@ -578,6 +651,7 @@ function Leaderboard({ onUserClick, goBack }) {
             <div key={col} style={col !== "" && col !== "Player" ? { textAlign: "center" } : {}}>{col}</div>
           ))}
         </div>
+
 
         {medalLeaderboard.map((entry, index) => (
           <div
@@ -623,6 +697,7 @@ function Leaderboard({ onUserClick, goBack }) {
   };
 
 
+
   return (
     <div style={styles.container}>
       {/* HEADER - STICKY */}
@@ -645,6 +720,7 @@ function Leaderboard({ onUserClick, goBack }) {
       </div>
 
 
+
       {/* CONTENT */}
       <div style={styles.contentContainer}>
         {activeTab !== "medals" && (
@@ -662,6 +738,7 @@ function Leaderboard({ onUserClick, goBack }) {
               : "📚 Words Masters"}
           </p>
         )}
+
 
 
         {/* TABS ROW 1: Today, Week, Month, Medals */}
@@ -693,6 +770,7 @@ function Leaderboard({ onUserClick, goBack }) {
         </div>
 
 
+
         {/* TABS ROW 2: All Time, Best, Words */}
         {activeTab !== "medals" && (
           <div style={styles.tabsContainerRow2}>
@@ -716,6 +794,7 @@ function Leaderboard({ onUserClick, goBack }) {
             </button>
           </div>
         )}
+
 
 
         {/* MEDALS SUB-TABS */}
@@ -746,6 +825,7 @@ function Leaderboard({ onUserClick, goBack }) {
         )}
 
 
+
         {loading ? (
           <div style={styles.loadingState}>⏳ Loading leaderboard...</div>
         ) : activeTab === "medals" ? (
@@ -771,6 +851,7 @@ function Leaderboard({ onUserClick, goBack }) {
     </div>
   );
 }
+
 
 
 export default Leaderboard;
