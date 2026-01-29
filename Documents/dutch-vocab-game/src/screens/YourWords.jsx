@@ -30,72 +30,75 @@ function YourWords({ goBack }) {
   // EFFECT: Load words with progress and calculate stats
   // ============================================================================
   useEffect(() => {
-    const fetchWords = async () => {
-      setLoading(true);
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        const userId = userData.user?.id;
 
 
 
-        if (!userId) {
-          alert("You must be logged in.");
-          goBack();
-          return;
-        }
+const fetchWords = async () => {
+  setLoading(true);
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
 
+    if (!userId) {
+      alert("You must be logged in.");
+      goBack();
+      return;
+    }
 
+    // 1. Fetch user_progress
+    const { data: progressData, error: progressError } = await supabase
+      .from("user_progress")
+      .select("*")
+      .eq("user_id", userId);
 
-        // 1. Fetch user_progress with word details
-        const { data: progressData, error: progressError } = await supabase
-          .from("user_progress")
-          .select("*")
-          .eq("user_id", userId);
+    if (progressError) throw progressError;
 
+    // 2. Get all word_ids
+    const wordIds = [...new Set((progressData || []).map(p => p.word_id))];
+    
+    // 3. Fetch ALL words in one query (più veloce + evita 406)
+    const { data: wordsData, error: wordsError } = await supabase
+      .from("words")
+      .select("*")
+      .in("id", wordIds);
+    
+    if (wordsError) throw wordsError;
 
+    // 4. Create a map for quick lookup
+    const wordsMap = new Map((wordsData || []).map(w => [w.id, w]));
 
-        if (progressError) throw progressError;
+    // 5. Merge progress with words (SKIP orphans!)
+    const progressWithWords = (progressData || [])
+      .map(progress => ({
+        ...progress,
+        words: wordsMap.get(progress.word_id) || null
+      }))
+      .filter(entry => entry.words !== null); // <-- FIX: ignora orfani
 
+    // 6. GROUP BY word_id and SUM counts
+    const groupedByWord = {};
+    progressWithWords.forEach((entry) => {
+      const wordId = entry.word_id;
+      if (!groupedByWord[wordId]) {
+        groupedByWord[wordId] = {
+          word_id: wordId,
+          words: entry.words,
+          correct_count: 0,
+          incorrect_count: 0,
+          mastered: entry.mastered,
+          id: entry.id,
+        };
+      }
+      groupedByWord[wordId].correct_count += entry.correct_count || 0;
+      groupedByWord[wordId].incorrect_count += entry.incorrect_count || 0;
+      groupedByWord[wordId].mastered =
+        groupedByWord[wordId].mastered || entry.mastered;
+    });
 
+    const aggregatedWords = Object.values(groupedByWord);
 
-        // 2. Fetch word details for each progress entry
-        const progressWithWords = await Promise.all(
-          (progressData || []).map(async (progress) => {
-            const { data: word } = await supabase
-              .from("words")
-              .select("*")
-              .eq("id", progress.word_id)
-              .single();
-            return { ...progress, words: word };
-          })
-        );
+    // ... resto del codice rimane uguale (withPercentage, categories, stats, ecc.)
 
-
-
-        // 3. GROUP BY word_id and SUM correct/incorrect counts
-        const groupedByWord = {};
-        (progressWithWords || []).forEach((entry) => {
-          const wordId = entry.word_id;
-          if (!groupedByWord[wordId]) {
-            groupedByWord[wordId] = {
-              word_id: wordId,
-              words: entry.words,
-              correct_count: 0,
-              incorrect_count: 0,
-              mastered: entry.mastered,
-              // Use the most recent ID for React key
-              id: entry.id,
-            };
-          }
-          // Sum the counts
-          groupedByWord[wordId].correct_count += entry.correct_count || 0;
-          groupedByWord[wordId].incorrect_count += entry.incorrect_count || 0;
-          // If any entry for this word is mastered, mark as mastered
-          groupedByWord[wordId].mastered =
-            groupedByWord[wordId].mastered || entry.mastered;
-        });
-
-        const aggregatedWords = Object.values(groupedByWord);
 
 
 
