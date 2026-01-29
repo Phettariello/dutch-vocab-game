@@ -67,7 +67,7 @@ function Achievements({ goBack, userId }) {
     }
 
 
-    const wordsNeeded = nextLevel.max;
+    const wordsNeeded = currentLevel.max;
 
 
     return {
