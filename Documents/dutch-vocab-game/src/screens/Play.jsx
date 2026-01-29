@@ -398,7 +398,7 @@ function Play({ goBack }) {
           .select("*")
           .eq("user_id", userId)
           .eq("word_id", word.id)
-          .single();
+          .maybeSingle();
 
         if (fetchError && fetchError.code !== "PGRST116") {
           console.error("Fetch error:", fetchError);

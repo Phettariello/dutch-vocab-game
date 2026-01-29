@@ -1,0 +1,128 @@
+CONTESTO PROGETTO:
+- Sono uno sviluppatore italiano basato ad Amsterdam
+- Ho sviluppato una web app di vocabulary learning: "Vocabulist"
+- URL live: https://dutch-vocab-game.vercel.app/
+- Stack: React + Vercel + Supabase (PostgreSQL)
+- GitHub: Ho repository con il codice
+- Voglio caricare l'app nel Google Play Store
+
+OBIETTIVI:
+1. RISOLVERE ERRORE DI AUTENTICAZIONE CRITICO sulla app live
+2. Guidarmi PASSO-PASSO a caricare la web app nel Google Play Store
+3. Creare tutta la documentazione, assets e configurazioni necessarie
+
+---
+
+ERRORE CRITICO DA RISOLVERE (priorità 1):
+La web app in produzione (Vercel) mostra questo errore quando accedo:
+
+bnfsbfiyswhgcmmqknhb.supabase.co/auth/v1/token?grant_type=refresh_token:1  
+Failed to load resource: the server responded with a status of 400 ()
+
+AuthApiError: Invalid Refresh Token: Refresh Token Not Found
+    at jp (index-DoJCHmc5.js:35:8426)
+    at async db (index-DoJCHmc5.js:35:9291)
+    at async ye (index-DoJCHmc5.js:35:9002)
+
+Anche questi errori appaiono:
+- Error saving profile: Object (status 409 - conflict)
+- Error fetching words: TypeError: Cannot read properties of null (reading 'category')
+- CORS issue su /rest/v1/words (status 406)
+
+Mi serve:
+A) Spiegazione chiara di cosa causa questo errore
+B) Soluzione implementabile (codice)
+C) Come testare che funziona
+
+---
+
+INFORMAZIONI APP:
+- Nome: Vocabulist 🌍
+- Descrizione breve (80 char max): "Learn Dutch vocabulary with interactive flashcards and spaced repetition"
+- Descrizione lunga: Falla tu una descrizione accattivante per app store (~4000 char)
+- Package Name: com.vocabulist.dutch
+- Version: 1.0.0
+- Target Android: voglio la soluzione PIÙ SEMPLICE possibile per Play Store
+
+OPZIONI DI DEPLOY (voglio capire quale è meglio):
+1. PWA (Progressive Web App) - installabile da browser, più semplice?
+2. APK nativo - più complesso?
+3. TWA (Trusted Web Activity) - ibrido?
+
+Voglio SOLO quella che richiede il minor setup e sia più veloce da caricare.
+
+---
+
+ASSETS BRANDING:
+- Logo/Icon: Manda un'icona minimalista con tema "vocabulist + mondo/lingua"
+- Screenshots: Devo fornirli? Quali dimensioni?
+- Colori brand: Blu scuro (#0f172a) e Cyan (#06b6d4)
+- Nome visualizzato: "Vocabulist"
+
+---
+
+PROCESSO GOOGLE PLAY STORE:
+Mi serve una guida ESATTA con:
+1. Setup account Google Play Developer (€25 una volta)
+2. Creazione app nel console
+3. Upload APK/configurazione
+4. Compilazione metadata
+5. Review & approvazione
+6. Post-launch management
+
+---
+
+TECH STACK ATTUALE:
+- Frontend: React 18.x + custom CSS
+- Backend: Supabase (PostgreSQL) + Supabase Auth
+- Hosting: Vercel
+- Database: Supabase
+  - Tables: users, words, user_progress, word_issues, profiles
+  - Auth: Email+Password via Supabase
+- VCS: GitHub
+- Browser compatibility: Mobile-first, responsive design
+
+---
+
+FILE/CODICE CHE HO:
+- Component Review.jsx - modalità quiz/review (300+ linee)
+- Component YourWords.jsx - mostra parole salvate (200+ linee)
+- supabaseClient.js - configurazione Supabase (dimmi come vederla)
+- Tutta la logica di autenticazione Supabase Auth
+
+---
+
+DOMANDE SPECIFICHE:
+1. Come risolvere l'errore "Invalid Refresh Token" in Supabase?
+2. PWA vs APK - quale mi consigli per app learning?
+3. Ci serve manifest.json personalizzato? 
+4. Come funziona la submission al Play Store - automated o manuale review?
+5. Quanto tempo impiega per essere approvata?
+6. Posso cambiare l'URL di base (Vercel) dopo il launch?
+
+---
+
+TIMELINE:
+- Voglio risolto l'errore auth OGGI se possibile
+- Voglio il Play Store setup DOMANI
+- Voglio il launch entro questa settimana
+
+---
+
+AIUTO RICHIESTO:
+1. ✅ Analisi + soluzione errore Supabase Auth
+2. ✅ Codice corretto per session persistence
+3. ✅ Guida step-by-step Play Store
+4. ✅ File di configurazione pronti (manifest.json, ecc)
+5. ✅ Descrizione app Store accattivante (italiano + inglese?)
+6. ✅ Icon/screenshot suggestions
+7. ✅ Troubleshooting comune + FAQ
+
+---
+
+PREFERENZE:
+- Lingua risposte: ITALIANO per spiegazioni, ENGLISH per codice
+- Formato: step-by-step con screenshots/visual guide se possibile
+- Dettaglio: Super dettagliato - voglio capire PERCHÉ faccio ogni passo
+- Codice: Pronto da copy-paste, con commenti
+- Non voglio: Teorie astratte - solo pratico e implementabile
