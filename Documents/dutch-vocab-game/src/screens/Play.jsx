@@ -67,15 +67,24 @@ function Play({ goBack }) {
     } catch (e) {}
   };
 
-  const fetchWordsForLevel = async (levelNumber) => {
-    try {
-      // Difficulty based on level: 1-10 use 1-3, 11+ use any (1-10)
-      let maxDifficulty = 3;
-      if (levelNumber >= 11) {
-        maxDifficulty = 10;
-      }
+const getMaxDifficultyForLevel = (levelNumber) => {
+  if (levelNumber <= 2) return 1;
+  if (levelNumber <= 5) return 2;
+  if (levelNumber <= 10) return 3;
+  if (levelNumber <= 20) return 4;
+  if (levelNumber <= 30) return 5;
+  if (levelNumber <= 40) return 6;
+  if (levelNumber <= 55) return 7;
+  if (levelNumber <= 70) return 8;
+  if (levelNumber <= 85) return 9;
+  return 10; // livelli 86–100
+};
 
-      console.log(
+const fetchWordsForLevel = async (levelNumber) => {
+  try {
+    const maxDifficulty = getMaxDifficultyForLevel(levelNumber);
+
+    console.log(
         `[Level ${levelNumber}] Fetching words with difficulty <= ${maxDifficulty}`
       );
       console.log(
@@ -161,18 +170,25 @@ function Play({ goBack }) {
     e.preventDefault();
     const userAnswer = answer.toLowerCase().trim();
 
-    const normalize = (str) => {
-      return str
-        .toLowerCase()
-        .trim()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\w\s]/g, "")
-        .replace(/ï/g, "i")
-        .replace(/ü/g, "u")
-        .replace(/ö/g, "o")
-        .replace(/\s+/g, " ");
-    };
+const normalizeDutch = (str) => {
+  return str
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, "") // rimuove punteggiatura
+    .replace(/ï/g, "i")
+    .replace(/ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/\s+/g, " ");
+};
+
+const normalizeEnglish = (str) => {
+  return str
+    .trim() // ⚠️ NON toLowerCase subito
+    .replace(/\s+/g, " "); // preserva "to "
+};
+
 
     const correctFull = currentWord.dutch.toLowerCase().trim();
     const correctBase = correctFull
@@ -180,11 +196,17 @@ function Play({ goBack }) {
       .replace(/^(de |het |een |het )/, "")
       .trim();
 
-    const normalizedAnswer = normalize(userAnswer);
-    const normalizedFull = normalize(correctFull);
-    const normalizedBase = normalize(correctBase);
-    const normalizedWithDe = normalize(`de ${correctBase}`);
-    const normalizedWithHet = normalize(`het ${correctBase}`);
+const normalizedAnswer = normalizeDutch(userAnswer);
+
+const normalizedFull = normalizeDutch(correctFull);
+
+const normalizedBase = normalizeDutch(
+  correctFull.split(",")[0]
+);
+
+const normalizedWithDe = normalizeDutch(`de ${normalizedBase}`);
+const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
+
 
     const isCorrect =
       normalizedAnswer === normalizedFull ||
