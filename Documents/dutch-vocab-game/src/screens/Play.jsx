@@ -38,6 +38,42 @@ const ANIMATIONS = `
 }
 `;
 
+// Short victory fanfare built with the Web Audio API (no sound files needed)
+function playCelebration(ctx, volume) {
+  const master = ctx.createGain();
+  master.gain.value = (volume / 100) * 0.5;
+  master.connect(ctx.destination);
+
+  const tone = (freq, start, duration, type = "triangle", level = 1) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t0 = ctx.currentTime + start;
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(level, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.05);
+  };
+
+  // Rising run: C5 E5 G5 C6
+  tone(523.25, 0.0, 0.16);
+  tone(659.25, 0.13, 0.16);
+  tone(783.99, 0.26, 0.16);
+  tone(1046.5, 0.39, 0.3);
+  // Short answer: G5 C6
+  tone(783.99, 0.78, 0.14);
+  tone(1046.5, 0.9, 0.14);
+  // Big final chord: C6 E6 G6 + sparkle on top
+  tone(1046.5, 1.05, 1.0);
+  tone(1318.5, 1.05, 1.0);
+  tone(1568.0, 1.05, 1.0);
+  tone(2093.0, 1.05, 0.6, "square", 0.12);
+}
+
 function Confetti() {
   const pieces = useMemo(
     () =>
@@ -113,6 +149,7 @@ function Play({ goBack }) {
   const [answerState, setAnswerState] = useState(null); // "correct" | "wrong" | null
   const [bonusPop, setBonusPop] = useState(null); // { id, text }
   const [heartHit, setHeartHit] = useState(null); // { index, id }
+  const [heartGained, setHeartGained] = useState(false);
   const [shownScore, setShownScore] = useState(0);
   const shownRef = useRef(0);
   const targetScore = totalSessionScore + score;
@@ -136,15 +173,35 @@ function Play({ goBack }) {
     return () => cancelAnimationFrame(raf);
   }, [targetScore]);
 
+  // One shared audio context. iPhone only allows sound after a tap, and a
+  // context created during a tap keeps working later (e.g. at level end).
+  const audioCtxRef = useRef(null);
+  const getAudioCtx = () => {
+    if (!audioCtxRef.current) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtxRef.current = new Ctx();
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  };
+
   const playSound = (type) => {
     const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
     const volume = parseFloat(localStorage.getItem("volume")) || 70;
 
     if (!soundEnabled) return;
 
+    if (type === "celebrate") {
+      try {
+        playCelebration(getAudioCtx(), volume);
+      } catch (e) {}
+      return;
+    }
+
     try {
-      const audioContext = new (window.AudioContext ||
-        window.webkitAudioContext)();
+      const audioContext = getAudioCtx();
       const osc = audioContext.createOscillator();
       const gain = audioContext.createGain();
       osc.connect(gain);
@@ -417,11 +474,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       }, 2000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
       setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel);
+        nextLevel(newScore, newQuestionsInLevel, newLives);
       }, 2000);
     } else if (currentIndex >= words.length - 1) {
       setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel);
+        nextLevel(newScore, newQuestionsInLevel, newLives);
       }, 2000);
     } else {
       setTimeout(() => {
@@ -449,7 +506,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     }
   };
 
-  const nextLevel = async (levelScore, totalQuestionsInLevel) => {
+  const nextLevel = async (levelScore, totalQuestionsInLevel, livesNow) => {
     const nextLevelNumber = currentLevel + 1;
     const levelBonus = currentLevel * 10;
 
@@ -465,7 +522,12 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       return;
     }
 
-    playSound("levelup");
+    // Reward: +1 heart for completing the level (maximum 5)
+    const gained = livesNow < 5;
+    setHeartGained(gained);
+    if (gained) setLives(Math.min(5, livesNow + 1));
+
+    playSound("celebrate");
     setLevelCompleted(true);
   };
 
@@ -674,6 +736,13 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
             <span style={styles.breakdownLabel}>Game Total</span>
             <span style={styles.breakdownValueSession}>
               {sessionTotalScore} pts
+            </span>
+          </div>
+
+          <div style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>Heart Bonus</span>
+            <span style={styles.breakdownValue}>
+              {heartGained ? "+1 ❤️" : "Hearts full ❤️"}
             </span>
           </div>
         </div>
