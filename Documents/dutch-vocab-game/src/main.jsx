@@ -13,6 +13,10 @@ if (window.visualViewport) {
       "--vv-top",
       `${vv.offsetTop}px`
     );
+    document.documentElement.style.setProperty(
+      "--vv-height",
+      `${vv.height}px`
+    );
   };
   vv.addEventListener("resize", updateViewportOffset);
   vv.addEventListener("scroll", updateViewportOffset);

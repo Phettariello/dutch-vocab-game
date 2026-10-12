@@ -145,6 +145,17 @@ const fetchWordsForLevel = async (levelNumber) => {
     initializeGame();
   }, []);
 
+  // iPhone: detect when the keyboard is open so the top area can shrink
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const check = () => setKeyboardOpen(window.innerHeight - vv.height > 150);
+    vv.addEventListener("resize", check);
+    check();
+    return () => vv.removeEventListener("resize", check);
+  }, []);
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
@@ -661,6 +672,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       <div style={styles.stickyTop}>
       <div style={styles.header}>
         <h1 style={styles.title}>🎮 Level {currentLevel}</h1>
+        {keyboardOpen && (
+          <div style={styles.compactStats}>
+            📊 {totalSessionScore + score} 🔥 {streak}
+          </div>
+        )}
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
@@ -675,28 +691,32 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
               e.currentTarget.style.transform = "scale(1)";
             }}
           >
-            ← Menu
+            {keyboardOpen ? "←" : "← Menu"}
           </button>
         </div>
       </div>
 
-      <div style={styles.progressBar}>
-        <div
-          style={{
-            ...styles.progressFill,
-            width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
-          }}
-        />
-      </div>
+      {!keyboardOpen && (
+        <>
+          <div style={styles.progressBar}>
+            <div
+              style={{
+                ...styles.progressFill,
+                width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
+              }}
+            />
+          </div>
 
-      <div style={styles.stats}>
-        <div style={styles.statItem}>
-          <span>📊</span> {totalSessionScore + score}
-        </div>
-        <div style={styles.statItem}>
-          <span>🔥</span> {streak}
-        </div>
-      </div>
+          <div style={styles.stats}>
+            <div style={styles.statItem}>
+              <span>📊</span> {totalSessionScore + score}
+            </div>
+            <div style={styles.statItem}>
+              <span>🔥</span> {streak}
+            </div>
+          </div>
+        </>
+      )}
 
       </div>
 
@@ -705,7 +725,14 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           Q{questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
         </p>
         <h2 style={styles.questionText}>Translate to Dutch:</h2>
-        <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
+        <h1
+          style={{
+            ...styles.wordToTranslate,
+            ...(keyboardOpen ? { fontSize: "28px" } : {}),
+          }}
+        >
+          {currentWord.english}
+        </h1>
       </div>
 
       {currentWord.example_nl && (
@@ -752,7 +779,14 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
 const styles = {
   container: {
-    minHeight: "100vh",
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "var(--vv-height, 100%)",
+    transform: "translateY(var(--vv-top, 0px))",
+    overflowY: "auto",
+    overflowX: "hidden",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     padding: "0",
     fontFamily:
@@ -765,8 +799,13 @@ const styles = {
     top: 0,
     zIndex: 100,
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-    // --vv-top is set in main.jsx: it follows the visible screen when the iPhone keyboard opens
-    transform: "translateY(var(--vv-top, 0px))",
+  },
+  compactStats: {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#bfdbfe",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   header: {
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
