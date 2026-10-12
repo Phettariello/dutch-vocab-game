@@ -658,6 +658,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
   return (
     <div style={styles.container}>
+      <div style={styles.stickyTop}>
       <div style={styles.header}>
         <h1 style={styles.title}>🎮 Level {currentLevel}</h1>
         <div style={styles.headerRight}>
@@ -695,6 +696,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         <div style={styles.statItem}>
           <span>🔥</span> {streak}
         </div>
+      </div>
+
       </div>
 
       <div style={styles.questionContainer}>
@@ -757,10 +760,15 @@ const styles = {
     display: "flex",
     flexDirection: "column",
   },
-  header: {
+  stickyTop: {
     position: "sticky",
     top: 0,
     zIndex: 100,
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    // --vv-top is set in main.jsx: it follows the visible screen when the iPhone keyboard opens
+    transform: "translateY(var(--vv-top, 0px))",
+  },
+  header: {
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexWrap: "wrap",
