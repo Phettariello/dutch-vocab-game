@@ -1,5 +1,87 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
+
+const ANIMATIONS = `
+@keyframes floatUp {
+  0%   { opacity: 0; transform: translate(-50%, 6px) scale(0.8); }
+  15%  { opacity: 1; transform: translate(-50%, -4px) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -34px) scale(1); }
+}
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(6,182,212,0.6); }
+  50%      { transform: scale(1.25); box-shadow: 0 0 0 5px rgba(6,182,212,0); }
+}
+@keyframes heartBreak {
+  0%   { transform: scale(1); }
+  20%  { transform: scale(1.5) rotate(-14deg); }
+  40%  { transform: scale(1.2) rotate(14deg); }
+  60%  { transform: scale(0.8) rotate(-8deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+@keyframes heartBeat {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.2); }
+}
+@keyframes inputShake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-8px); }
+  40%      { transform: translateX(8px); }
+  60%      { transform: translateX(-5px); }
+  80%      { transform: translateX(5px); }
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
+`;
+
+function Confetti() {
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 40 }, (_, i) => ({
+        left: Math.random() * 100,
+        delay: Math.random() * 0.8,
+        duration: 2.2 + Math.random() * 1.6,
+        size: 6 + Math.random() * 6,
+        color: ["#fbbf24", "#06b6d4", "#7c3aed", "#22c55e", "#ef4444", "#3b82f6"][i % 6],
+      })),
+    []
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        pointerEvents: "none",
+        overflow: "hidden",
+        zIndex: 200,
+      }}
+    >
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            top: "-20px",
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.size * 1.6,
+            background: p.color,
+            borderRadius: "2px",
+            animation: `confettiFall ${p.duration}s ${p.delay}s ease-in forwards`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function Play({ goBack }) {
   const [words, setWords] = useState([]);
@@ -26,6 +108,33 @@ function Play({ goBack }) {
   });
 
   const QUESTIONS_PER_LEVEL = 10;
+
+  // Visual feedback state
+  const [answerState, setAnswerState] = useState(null); // "correct" | "wrong" | null
+  const [bonusPop, setBonusPop] = useState(null); // { id, text }
+  const [heartHit, setHeartHit] = useState(null); // { index, id }
+  const [shownScore, setShownScore] = useState(0);
+  const shownRef = useRef(0);
+  const targetScore = totalSessionScore + score;
+
+  // Score counts up smoothly instead of jumping
+  useEffect(() => {
+    const from = shownRef.current;
+    const to = targetScore;
+    if (from === to) return;
+    const start = performance.now();
+    const duration = 500;
+    let raf;
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const value = Math.round(from + (to - from) * (1 - Math.pow(1 - t, 3)));
+      shownRef.current = value;
+      setShownScore(value);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [targetScore]);
 
   const playSound = (type) => {
     const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
@@ -256,6 +365,17 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
     }
 
+    if (isCorrect) {
+      setAnswerState("correct");
+      setBonusPop({ id: Date.now(), text: `+${wordPoints + streakBonusThisRound}` });
+    } else {
+      setAnswerState("wrong");
+      setHeartHit({ index: newLives, id: Date.now() });
+    }
+    setTimeout(() => setAnswerState(null), 700);
+    setTimeout(() => setBonusPop(null), 1000);
+    setTimeout(() => setHeartHit(null), 800);
+
     const newUsedWords = new Set(usedWordIds);
     newUsedWords.add(currentWord.id);
     setUsedWordIds(newUsedWords);
@@ -481,8 +601,20 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
   const renderHearts = () => {
     const hearts = [];
     for (let i = 0; i < 5; i++) {
+      const justLost = heartHit && heartHit.index === i;
+      const lastOne = lives === 1 && i === 0;
       hearts.push(
-        <span key={i} style={styles.heart}>
+        <span
+          key={justLost ? `${i}-${heartHit.id}` : i}
+          style={{
+            ...styles.heart,
+            ...(justLost
+              ? { animation: "heartBreak 0.7s ease-out" }
+              : lastOne
+              ? { animation: "heartBeat 1s ease-in-out infinite" }
+              : {}),
+          }}
+        >
           {i < lives ? "❤️" : "🩶"}
         </span>
       );
@@ -500,6 +632,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
     return (
       <div style={styles.levelCompleteContainer}>
+        <style>{ANIMATIONS}</style>
+        <Confetti />
         <h1 style={styles.levelCompleteTitle}>
           🎉 Level {currentLevel} Complete!
         </h1>
@@ -669,14 +803,10 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
   return (
     <div style={styles.container}>
+      <style>{ANIMATIONS}</style>
       <div style={styles.stickyTop}>
       <div style={styles.header}>
         <h1 style={styles.title}>🎮 Level {currentLevel}</h1>
-        {keyboardOpen && (
-          <div style={styles.compactStats}>
-            📊 {totalSessionScore + score} 🔥 {streak}
-          </div>
-        )}
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
@@ -696,27 +826,45 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         </div>
       </div>
 
-      {!keyboardOpen && (
-        <>
-          <div style={styles.progressBar}>
-            <div
-              style={{
-                ...styles.progressFill,
-                width: `${(questionsInLevel / QUESTIONS_PER_LEVEL) * 100}%`,
-              }}
-            />
-          </div>
+      <div style={keyboardOpen ? styles.hudCompact : styles.hud}>
+        <div style={styles.scoreWrap}>
+          <span style={keyboardOpen ? styles.scoreCompact : styles.scoreBig}>
+            {shownScore.toLocaleString()}
+          </span>
+          {streak > 0 && <span style={styles.streakChip}>🔥 {streak}</span>}
+          {bonusPop && (
+            <span key={bonusPop.id} style={styles.bonusPop}>
+              {bonusPop.text}
+            </span>
+          )}
+        </div>
 
-          <div style={styles.stats}>
-            <div style={styles.statItem}>
-              <span>📊</span> {totalSessionScore + score}
-            </div>
-            <div style={styles.statItem}>
-              <span>🔥</span> {streak}
-            </div>
-          </div>
-        </>
-      )}
+        <div style={styles.dots}>
+          {Array.from({ length: QUESTIONS_PER_LEVEL }).map((_, i) => {
+            const result = sessionResults[i];
+            const isCurrent = !result && i === questionsInLevel;
+            return (
+              <span
+                key={i}
+                style={{
+                  ...styles.dot,
+                  ...(keyboardOpen ? styles.dotSmall : {}),
+                  background: result
+                    ? result.correct
+                      ? "#22c55e"
+                      : "#ef4444"
+                    : isCurrent
+                    ? "#06b6d4"
+                    : "rgba(6,182,212,0.2)",
+                  animation: isCurrent
+                    ? "dotPulse 1.2s ease-in-out infinite"
+                    : "none",
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
 
       </div>
 
@@ -754,7 +902,14 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
           placeholder="Type the translation..."
-          style={styles.input}
+          style={{
+            ...styles.input,
+            ...(answerState === "correct"
+              ? styles.inputCorrect
+              : answerState === "wrong"
+              ? styles.inputWrong
+              : {}),
+          }}
           disabled={gameOver}
           autoFocus
         />
@@ -800,12 +955,89 @@ const styles = {
     zIndex: 100,
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
   },
-  compactStats: {
+  hud: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "10px",
+    padding: "12px 16px 14px",
+  },
+  hudCompact: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "6px 16px 8px",
+  },
+  dots: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center",
+  },
+  dot: {
+    width: "14px",
+    height: "14px",
+    borderRadius: "50%",
+    transition: "background 0.3s ease",
+  },
+  dotSmall: {
+    width: "9px",
+    height: "9px",
+  },
+  scoreWrap: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+  },
+  scoreBig: {
+    fontSize: "clamp(34px, 10vw, 44px)",
+    fontWeight: "800",
+    color: "#fbbf24",
+    lineHeight: 1,
+    textShadow: "0 2px 12px rgba(251,191,36,0.35)",
+    fontVariantNumeric: "tabular-nums",
+  },
+  scoreCompact: {
+    fontSize: "22px",
+    fontWeight: "800",
+    color: "#fbbf24",
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+  },
+  streakChip: {
     fontSize: "13px",
-    fontWeight: "600",
-    color: "#bfdbfe",
+    fontWeight: "700",
+    color: "#fdba74",
+    background: "rgba(249,115,22,0.18)",
+    border: "1px solid rgba(249,115,22,0.4)",
+    borderRadius: "999px",
+    padding: "2px 8px",
     whiteSpace: "nowrap",
-    flexShrink: 0,
+  },
+  bonusPop: {
+    position: "absolute",
+    top: "-6px",
+    left: "50%",
+    color: "#22c55e",
+    fontWeight: "800",
+    fontSize: "18px",
+    pointerEvents: "none",
+    whiteSpace: "nowrap",
+    animation: "floatUp 1s ease-out forwards",
+    textShadow: "0 2px 8px rgba(0,0,0,0.5)",
+  },
+  inputCorrect: {
+    borderColor: "#22c55e",
+    boxShadow: "0 0 0 3px rgba(34,197,94,0.4)",
+    background: "#ecfdf5",
+  },
+  inputWrong: {
+    borderColor: "#ef4444",
+    boxShadow: "0 0 0 3px rgba(239,68,68,0.4)",
+    background: "#fef2f2",
+    animation: "inputShake 0.4s ease-in-out",
   },
   header: {
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
