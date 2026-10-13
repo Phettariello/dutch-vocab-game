@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import "./App.css";
+import "../App.css";
 import Play from "./Play";
 import Review from "./Review";
 import YourWords from "./YourWords";
