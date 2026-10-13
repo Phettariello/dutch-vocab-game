@@ -74,7 +74,7 @@ function BackgroundMusic() {
   return (
     <audio
       ref={audioRef}
-      src="/background-classical.wav"
+      src="/background-music.mp3"
       loop
       preload="auto"
       aria-hidden="true"
@@ -98,7 +98,7 @@ function Home() {
 
   const handleLogout = async () => {
     // Stop music immediately on logout, before the login screen appears.
-    const audio = document.querySelector("audio[src='/background-classical.wav']");
+    const audio = document.querySelector("audio[src='/background-music.mp3']");
     if (audio) {
       audio.pause();
       audio.currentTime = 0;

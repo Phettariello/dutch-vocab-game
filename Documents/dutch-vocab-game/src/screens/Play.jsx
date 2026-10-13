@@ -137,6 +137,7 @@ function PlayGame({ goBack, onRestart }) {
   const [reportComment, setReportComment] = useState("");
   const [reportStatus, setReportStatus] = useState("");
   const [lastAnswerWrong, setLastAnswerWrong] = useState(false);
+  const [wrongAnswerCard, setWrongAnswerCard] = useState(null);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(5);
   const [streak, setStreak] = useState(0);
@@ -524,38 +525,46 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       }));
     }
 
-    if (newLives <= 0) {
+    const transition = newLives <= 0
+      ? "gameOver"
+      : (newQuestionsInLevel >= QUESTIONS_PER_LEVEL || currentIndex >= words.length - 1)
+        ? "nextLevel"
+        : "nextQuestion";
+
+    if (!isCorrect) {
+      // Wrong answers pause here until the player has read the correction and continues.
+      setWrongAnswerCard({
+        english: currentWord.english,
+        dutch: currentWord.dutch,
+        userAnswer,
+        transition,
+        newScore,
+        newQuestionsInLevel,
+        newLives,
+        results: [...allSessionResults, newSessionResult],
+        totalSessionScore,
+        currentWordId: currentWord.id,
+        currentIndex,
+      });
+    } else if (transition === "gameOver") {
       setTimeout(() => {
         const finalPoints = newScore + totalSessionScore;
         setFinalScore(finalPoints);
         saveSessionAuto(finalPoints, [...allSessionResults, newSessionResult]);
         setGameOver(true);
-      }, isCorrect ? 2000 : 8000);
-    } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
+      }, 2000);
+    } else if (transition === "nextLevel") {
       setTimeout(() => {
         nextLevel(newScore, newQuestionsInLevel, newLives);
-      }, isCorrect ? 2000 : 8000);
-    } else if (currentIndex >= words.length - 1) {
-      setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel, newLives);
-      }, isCorrect ? 2000 : 8000);
+      }, 2000);
     } else {
       setTimeout(() => {
         const nextIndex = currentIndex + 1;
         if (nextIndex < words.length) {
           if (words[nextIndex].id === currentWord.id) {
             let findIndex = nextIndex + 1;
-            while (
-              findIndex < words.length &&
-              words[findIndex].id === currentWord.id
-            ) {
-              findIndex++;
-            }
-            if (findIndex < words.length) {
-              setCurrentIndex(findIndex);
-            } else {
-              setCurrentIndex(nextIndex);
-            }
+            while (findIndex < words.length && words[findIndex].id === currentWord.id) findIndex++;
+            setCurrentIndex(findIndex < words.length ? findIndex : nextIndex);
           } else {
             setCurrentIndex(nextIndex);
           }
@@ -564,8 +573,43 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         setLastAnswerWrong(false);
         answerLockedRef.current = false;
         setAnswerLocked(false);
-      }, isCorrect ? 2000 : 8000);
+      }, 2000);
     }
+  };
+
+  const continueAfterWrongAnswer = () => {
+    if (!wrongAnswerCard) return;
+    const pending = wrongAnswerCard;
+    setWrongAnswerCard(null);
+    setReportOpen(false);
+    setReportStatus("");
+    setLastAnswerWrong(false);
+
+    if (pending.transition === "gameOver") {
+      const finalPoints = pending.newScore + pending.totalSessionScore;
+      setFinalScore(finalPoints);
+      saveSessionAuto(finalPoints, pending.results);
+      setGameOver(true);
+      return;
+    }
+    if (pending.transition === "nextLevel") {
+      nextLevel(pending.newScore, pending.newQuestionsInLevel, pending.newLives);
+      return;
+    }
+
+    const nextIndex = pending.currentIndex + 1;
+    if (nextIndex < words.length) {
+      if (words[nextIndex].id === pending.currentWordId) {
+        let findIndex = nextIndex + 1;
+        while (findIndex < words.length && words[findIndex].id === pending.currentWordId) findIndex++;
+        setCurrentIndex(findIndex < words.length ? findIndex : nextIndex);
+      } else {
+        setCurrentIndex(nextIndex);
+      }
+    }
+    setFeedback("");
+    answerLockedRef.current = false;
+    setAnswerLocked(false);
   };
 
   const nextLevel = async (levelScore, totalQuestionsInLevel, livesNow) => {
@@ -1115,19 +1159,19 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         </button>
       </form>
 
-      {feedback && (
+      {feedback && !wrongAnswerCard && (
         <p style={{ ...styles.feedback, color: feedback.includes("✅") ? "#10b981" : "#ef4444" }}>
           {feedback}
         </p>
       )}
 
-      {lastAnswerWrong && !reportOpen && (
+      {lastAnswerWrong && !reportOpen && !wrongAnswerCard && (
         <div style={{ textAlign: "center", padding: "0 16px 14px" }}>
           <button type="button" onClick={() => setReportOpen(true)} style={styles.reportIssueButton}>⚑ Report issue</button>
         </div>
       )}
 
-      {reportOpen && (
+      {reportOpen && !wrongAnswerCard && (
         <form onSubmit={submitWordIssueReport} style={styles.reportForm}>
           <h3 style={styles.reportTitle}>Report a word issue</h3>
           <p style={styles.reportWord}><strong>{reportedWord?.english ?? currentWord.english}</strong> → {reportedWord?.dutch ?? currentWord.dutch}</p>
@@ -1141,11 +1185,78 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           {reportStatus && <p style={styles.reportStatus} role="status">{reportStatus}</p>}
         </form>
       )}
+
+      {wrongAnswerCard && (
+        <div role="dialog" aria-modal="true" aria-labelledby="wrong-answer-title" style={styles.wrongAnswerOverlay}>
+          <div style={styles.wrongAnswerCard}>
+            {!reportOpen ? (
+              <>
+                <div style={styles.wrongAnswerIcon}>✕</div>
+                <p style={styles.wrongAnswerEyebrow}>NOT QUITE</p>
+                <h2 id="wrong-answer-title" style={styles.wrongAnswerTitle}>Learn from this one</h2>
+                <p style={styles.wrongAnswerEnglish}>{wrongAnswerCard.english}</p>
+                <div style={styles.correctAnswerBox}>
+                  <span style={styles.correctAnswerLabel}>CORRECT ANSWER</span>
+                  <strong style={styles.correctAnswerDutch}>{wrongAnswerCard.dutch}</strong>
+                </div>
+                <p style={styles.wrongAnswerNote}>
+                  {wrongAnswerCard.userAnswer
+                    ? <>Your answer: <strong>{wrongAnswerCard.userAnswer}</strong></>
+                    : "No answer entered"}
+                  {" · ❤️ One life lost"}
+                </p>
+                <button type="button" onClick={continueAfterWrongAnswer} style={styles.wrongAnswerContinueButton}>
+                  {wrongAnswerCard.transition === "gameOver" ? "See Results" : wrongAnswerCard.transition === "nextLevel" ? "Continue" : "Next Question"}
+                  <span aria-hidden="true"> →</span>
+                </button>
+                <button type="button" onClick={() => setReportOpen(true)} style={styles.wrongAnswerReportButton}>⚑ Report issue with this word</button>
+              </>
+            ) : (
+              <form onSubmit={submitWordIssueReport}>
+                <h2 id="wrong-answer-title" style={styles.reportTitle}>Report a word issue</h2>
+                <p style={styles.reportWord}><strong>{wrongAnswerCard.english}</strong> → {wrongAnswerCard.dutch}</p>
+                <textarea value={reportComment} onChange={(e) => setReportComment(e.target.value)}
+                  placeholder="What's wrong with this word or translation?" maxLength={1000}
+                  required rows={3} style={styles.reportTextarea} />
+                <div style={styles.reportActions}>
+                  <button type="button" onClick={() => { setReportOpen(false); setReportStatus(""); }} style={styles.reportCancelButton}>Back</button>
+                  <button type="submit" style={styles.reportSubmitButton}>Submit report</button>
+                </div>
+                {reportStatus && <p style={styles.reportStatus} role="status">{reportStatus}</p>}
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 const styles = {
+  wrongAnswerOverlay: {
+    position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom))",
+    background: "rgba(2, 6, 23, 0.82)", backdropFilter: "blur(8px)", overflowY: "auto",
+  },
+  wrongAnswerCard: {
+    width: "100%", maxWidth: "420px", maxHeight: "100%", overflowY: "auto", boxSizing: "border-box",
+    padding: "26px 22px 22px", borderRadius: "26px", textAlign: "center", color: "#f8fafc",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)", border: "1px solid rgba(148,163,184,0.35)",
+    boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+  },
+  wrongAnswerIcon: {
+    width: "48px", height: "48px", margin: "0 auto 10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+    background: "rgba(248,113,113,0.15)", border: "2px solid #f87171", color: "#fca5a5", fontSize: "24px", fontWeight: 900,
+  },
+  wrongAnswerEyebrow: { margin: "0 0 5px", color: "#fca5a5", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
+  wrongAnswerTitle: { margin: "0 0 14px", fontSize: "24px", lineHeight: 1.2, fontWeight: 850 },
+  wrongAnswerEnglish: { margin: "0 0 14px", fontSize: "17px", color: "#cbd5e1" },
+  correctAnswerBox: { display: "flex", flexDirection: "column", gap: "7px", padding: "17px 14px", borderRadius: "16px", background: "rgba(16,185,129,0.12)", border: "1px solid rgba(52,211,153,0.55)" },
+  correctAnswerLabel: { color: "#6ee7b7", fontSize: "11px", fontWeight: 900, letterSpacing: "1.5px" },
+  correctAnswerDutch: { color: "#ecfdf5", fontSize: "clamp(24px, 7vw, 32px)", overflowWrap: "anywhere", lineHeight: 1.2 },
+  wrongAnswerNote: { margin: "14px 0 18px", color: "#cbd5e1", fontSize: "13px", lineHeight: 1.5, overflowWrap: "anywhere" },
+  wrongAnswerContinueButton: { width: "100%", border: 0, borderRadius: "14px", padding: "15px 18px", color: "#052e2b", background: "linear-gradient(135deg, #6ee7b7, #34d399)", fontSize: "16px", fontWeight: 850, cursor: "pointer", boxShadow: "0 8px 22px rgba(16,185,129,0.2)" },
+  wrongAnswerReportButton: { marginTop: "12px", padding: "10px 12px", border: "1px solid rgba(148,163,184,0.35)", borderRadius: "10px", color: "#cbd5e1", background: "transparent", fontSize: "13px", cursor: "pointer" },
   container: {
     position: "fixed",
     top: 0,
