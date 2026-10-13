@@ -68,7 +68,7 @@ function ForgotPassword({ onBack }) {
           <input id="reset-email" type="email" autoComplete="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} style={styles.input} required />
           <button type="submit" disabled={loading} style={{ ...styles.button, opacity: loading ? 0.65 : 1 }}>{loading ? "Sending link..." : "Send reset link"}</button>
         </form>
-        <button type="button" onClick={onBack} style={styles.link}>← Back to sign up</button>
+        <button type="button" onClick={onBack} style={styles.link}>← Back to Sign In</button>
       </section>
     </main>
   );

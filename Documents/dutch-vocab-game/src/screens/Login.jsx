@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import Home from "./Home";
 import SignUp from "./SignUp";
+import ForgotPassword from "./ForgotPassword";
 
 
 function Login() {
@@ -11,6 +12,7 @@ function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isRecovery, setIsRecovery] = useState(
     window.location.search.includes("resetPassword=true") ||
     window.location.hash.includes("type=recovery")
@@ -22,10 +24,14 @@ function Login() {
 
   useEffect(() => {
     const getSession = async () => {
+      // Keep the reset form visible when the email link returns to the app.
+      const params = new URLSearchParams(window.location.search);
+      const recoveryInUrl = params.get("resetPassword") === "true" ||
+        window.location.hash.includes("type=recovery");
+      if (recoveryInUrl) setIsRecovery(true);
+
       const { data } = await supabase.auth.getSession();
-      if (data?.session) {
-        setSession(data.session);
-      }
+      if (data?.session) setSession(data.session);
     };
     getSession();
 
@@ -87,6 +93,10 @@ function Login() {
   };
 
 
+  if (showForgotPassword && !isRecovery) {
+    return <ForgotPassword onBack={() => setShowForgotPassword(false)} />;
+  }
+
   if (showSignUp && !isRecovery) {
     return <SignUp />;
   }
@@ -122,7 +132,10 @@ function Login() {
       return;
     }
 
-    setRecoveryMessage("Your password has been updated. Redirecting to Vocabulist...");
+    // End the temporary recovery session so the user can sign in with the new password.
+    await supabase.auth.signOut();
+    setSession(null);
+    setRecoveryMessage("Your password has been updated. You can now sign in with your new password.");
     window.history.replaceState({}, document.title, window.location.pathname);
     setIsRecovery(false);
     setNewPassword("");
@@ -314,6 +327,17 @@ function Login() {
             />
           </div>
 
+          <div style={{ textAlign: "right", marginTop: "-8px" }}>
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              style={styles.link}
+              onMouseEnter={(e) => Object.assign(e.target.style, styles.linkHover)}
+              onMouseLeave={(e) => { e.target.style.color = "#06b6d4"; }}
+            >
+              Forgot your password?
+            </button>
+          </div>
 
           <button
             type="submit"

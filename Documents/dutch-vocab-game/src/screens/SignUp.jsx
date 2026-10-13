@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { supabase } from "../supabaseClient";
 import Login from "./Login";
-import ForgotPassword from "./ForgotPassword";
 
 
 function SignUp() {
@@ -13,7 +12,6 @@ function SignUp() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
 
   const handleSignUp = async (e) => {
@@ -103,10 +101,6 @@ function SignUp() {
     setLoading(false);
   };
 
-
-  if (showForgotPassword) {
-    return <ForgotPassword onBack={() => setShowForgotPassword(false)} />;
-  }
 
   if (showLogin) {
     return <Login />;
@@ -359,17 +353,6 @@ function SignUp() {
         </form>
 
 
-        <div style={{ ...styles.footer, marginTop: "16px" }}>
-          <button
-            type="button"
-            onClick={() => setShowForgotPassword(true)}
-            style={styles.link}
-            onMouseEnter={(e) => Object.assign(e.target.style, styles.linkHover)}
-            onMouseLeave={(e) => { e.target.style.color = "#06b6d4"; }}
-          >
-            Forgot your password?
-          </button>
-        </div>
 
         <div style={styles.footer}>
           Already have an account?{" "}
