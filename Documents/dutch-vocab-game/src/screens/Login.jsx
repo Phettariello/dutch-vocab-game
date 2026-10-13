@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import Home from "./Home";
 import SignUp from "./SignUp";
 import ForgotPassword from "./ForgotPassword";
-
+import AuthBrand from "./AuthBrand";
+import { authStyles as s } from "./AuthStyles";
 
 function Login() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [session, setSession] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,361 +25,153 @@ function Login() {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [recoveryMessage, setRecoveryMessage] = useState("");
 
-
   useEffect(() => {
-    const getSession = async () => {
-      // Keep the reset form visible when the email link returns to the app.
-      const params = new URLSearchParams(window.location.search);
-      const recoveryInUrl = params.get("resetPassword") === "true" ||
-        window.location.hash.includes("type=recovery");
-      if (recoveryInUrl) setIsRecovery(true);
-
+    let active = true;
+    const loadSession = async () => {
       const { data } = await supabase.auth.getSession();
-      if (data?.session) setSession(data.session);
+      if (active && data?.session) setSession(data.session);
     };
-    getSession();
+    loadSession();
 
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!active) return;
       if (event === "PASSWORD_RECOVERY") {
         setIsRecovery(true);
         setError("");
       }
-      setSession(session);
+      setSession(nextSession);
     });
-
-
     return () => {
+      active = false;
       subscription.unsubscribe();
     };
   }, []);
-
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    const value = identifier.trim();
 
-
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-      return;
-    }
-
-
-    // Save or update profile
     try {
-      const user = data.user;
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .upsert({
-          user_id: user.id,
-          email: user.email,
+      if (value.includes("@")) {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email: value, password });
+        if (signInError) throw signInError;
+        if (data?.session) setSession(data.session);
+      } else {
+        const { data, error: functionError } = await supabase.functions.invoke("login-with-username", {
+          body: { username: value, password },
         });
+        if (functionError) throw new Error("Username sign-in is not configured yet. Please try your email or contact support.");
+        if (data?.error) throw new Error(data.error);
+        if (!data?.session?.access_token || !data?.session?.refresh_token) {
+          throw new Error("Could not sign in with that username and password. Check your details and try again.");
+        }
+        const { data: sessionData, error: sessionError } = await supabase.auth.setSession(data.session);
+        if (sessionError) throw sessionError;
+        setSession(sessionData.session);
+      }
 
-
-      if (profileError) throw profileError;
-    } catch (error) {
-      console.error("Error saving profile:", error);
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData?.user;
+      if (user) {
+        const { error: profileError } = await supabase.from("profiles").upsert({ user_id: user.id, email: user.email });
+        if (profileError) console.error("Error updating profile after sign-in:", profileError);
+      }
+    } catch (err) {
+      setError(err.message || "Could not sign in. Check your details and try again.");
+    } finally {
+      setLoading(false);
     }
-
-
-    setLoading(false);
   };
-
-
-  if (showForgotPassword && !isRecovery) {
-    return <ForgotPassword onBack={() => setShowForgotPassword(false)} />;
-  }
-
-  if (showSignUp && !isRecovery) {
-    return <SignUp />;
-  }
-
-
-  if (session && !isRecovery) {
-    return <Home />;
-  }
-
-
-
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
     setError("");
     setRecoveryMessage("");
-
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters!");
-      return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      setError("Passwords do not match!");
-      return;
-    }
+    if (newPassword.length < 6) return setError("Your password must be at least 6 characters.");
+    if (newPassword !== confirmNewPassword) return setError("The passwords do not match.");
 
     setLoading(true);
     const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
     setLoading(false);
-
     if (updateError) {
       setError(updateError.message);
       return;
     }
 
-    // End the temporary recovery session so the user can sign in with the new password.
+    setRecoveryMessage("Your password has been updated. Please sign in with your new password.");
     await supabase.auth.signOut();
     setSession(null);
-    setRecoveryMessage("Your password has been updated. You can now sign in with your new password.");
     window.history.replaceState({}, document.title, window.location.pathname);
     setIsRecovery(false);
     setNewPassword("");
     setConfirmNewPassword("");
   };
 
-  const styles = {
-    container: {
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "0",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    card: {
-      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
-      border: "1px solid rgba(6,182,212,0.2)",
-      borderRadius: "12px",
-      padding: "40px",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-      maxWidth: "420px",
-      width: "100%",
-      margin: "20px",
-      boxSizing: "border-box",
-    },
-    title: {
-      fontSize: "clamp(24px, 6vw, 32px)",
-      fontWeight: "800",
-      margin: "0 0 12px 0",
-      color: "white",
-      textShadow: "0 2px 8px rgba(6,182,212,0.3)",
-      textAlign: "center",
-    },
-    subtitle: {
-      fontSize: "clamp(12px, 2.5vw, 14px)",
-      color: "#06b6d4",
-      margin: "0 0 28px 0",
-      textAlign: "center",
-      textTransform: "uppercase",
-      letterSpacing: "0.5px",
-      fontWeight: "600",
-    },
-    form: {
-      display: "flex",
-      flexDirection: "column",
-      gap: "16px",
-    },
-    formGroup: {
-      display: "flex",
-      flexDirection: "column",
-      gap: "8px",
-    },
-    label: {
-      fontSize: "clamp(12px, 2.5vw, 13px)",
-      color: "#bfdbfe",
-      fontWeight: "600",
-    },
-    input: {
-      padding: "12px 14px",
-      fontSize: "clamp(13px, 3vw, 14px)",
-      border: "1px solid rgba(6,182,212,0.3)",
-      borderRadius: "8px",
-      background: "rgba(255,255,255,0.95)",
-      color: "#0f172a",
-      transition: "all 0.2s ease",
-      fontFamily: "inherit",
-      boxSizing: "border-box",
-    },
-    inputFocus: {
-      borderColor: "#06b6d4",
-      outline: "none",
-      boxShadow: "0 0 0 3px rgba(6,182,212,0.2)",
-    },
-    button: {
-      padding: "12px 24px",
-      fontSize: "clamp(13px, 2.5vw, 14px)",
-      fontWeight: "700",
-      background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
-      color: "white",
-      border: "none",
-      borderRadius: "8px",
-      cursor: "pointer",
-      transition: "all 0.2s ease",
-      boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
-      marginTop: "8px",
-    },
-    buttonHover: {
-      transform: "translateY(-2px)",
-      boxShadow: "0 6px 20px rgba(59, 130, 246, 0.4)",
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-      cursor: "not-allowed",
-    },
-    error: {
-      background: "rgba(239, 68, 68, 0.15)",
-      border: "1px solid rgba(239, 68, 68, 0.3)",
-      color: "#fca5a5",
-      padding: "12px",
-      borderRadius: "8px",
-      fontSize: "clamp(12px, 2.5vw, 13px)",
-      fontWeight: "500",
-      marginBottom: "16px",
-      textAlign: "center",
-    },
-    footer: {
-      marginTop: "24px",
-      textAlign: "center",
-      fontSize: "clamp(12px, 2.5vw, 13px)",
-      color: "#bfdbfe",
-    },
-    link: {
-      background: "none",
-      border: "none",
-      color: "#06b6d4",
-      cursor: "pointer",
-      textDecoration: "underline",
-      font: "inherit",
-      fontSize: "inherit",
-      fontWeight: "600",
-      transition: "color 0.2s ease",
-    },
-    linkHover: {
-      color: "#3b82f6",
-    },
-  };
-
+  if (showSignUp && !isRecovery) return <SignUp />;
+  if (showForgotPassword && !isRecovery) return <ForgotPassword onBack={() => setShowForgotPassword(false)} />;
+  if (session && !isRecovery) return <Home />;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>🎮 Vocabulist</h1>
-        <p style={styles.subtitle}>{isRecovery ? "Choose a New Password" : "Welcome Back"}</p>
+    <main style={s.page}>
+      <section style={s.card}>
+        <AuthBrand />
+        <p style={s.eyebrow}>{isRecovery ? "ACCOUNT SECURITY" : "WELCOME BACK"}</p>
+        <h1 style={s.title}>{isRecovery ? "Reset your password" : "Log in to Vocabulist"}</h1>
+        <p style={s.description}>
+          {isRecovery ? "Choose a new password to get back to learning." : "Continue your Dutch learning journey."}
+        </p>
 
-        {error && <div style={styles.error}>❌ {error}</div>}
-        {recoveryMessage && <div style={{ ...styles.error, background: "rgba(34,197,94,0.15)", borderColor: "rgba(34,197,94,0.3)", color: "#bbf7d0" }} role="status">✅ {recoveryMessage}</div>}
+        {error && <div role="alert" style={{ ...s.message, ...s.error }}> {error} </div>}
+        {recoveryMessage && <div role="status" style={{ ...s.message, ...s.success }}>{recoveryMessage}</div>}
 
         {isRecovery ? (
-          <form onSubmit={handlePasswordUpdate} style={styles.form}>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>New password</label>
-              <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={styles.input} required minLength={6} />
+          <form onSubmit={handlePasswordUpdate} style={s.form}>
+            <div style={s.group}>
+              <label htmlFor="new-password" style={s.label}>New password</label>
+              <div style={s.passwordWrap}>
+                <input id="new-password" type={showNewPassword ? "text" : "password"} autoComplete="new-password" minLength={6} placeholder="At least 6 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={{ ...s.input, paddingRight: 52 }} required />
+                <button type="button" onClick={() => setShowNewPassword(v => !v)} style={s.eyeButton} aria-label={showNewPassword ? "Hide password" : "Show password"}>{showNewPassword ? <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a2 2 0 002.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1.1-1.2 2.3-2.3 3.4M6.2 6.2C3.9 7.7 2.8 10 2.5 12c.6 1.7 2.4 4.4 5.8 5.7 1.1.4 2.3.7 3.7.7"/></svg> : <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
+              </div>
             </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Confirm new password</label>
-              <input type="password" autoComplete="new-password" placeholder="Enter the new password again" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} style={styles.input} required minLength={6} />
+            <div style={s.group}>
+              <label htmlFor="confirm-new-password" style={s.label}>Confirm new password</label>
+              <div style={s.passwordWrap}>
+                <input id="confirm-new-password" type={showConfirmNewPassword ? "text" : "password"} autoComplete="new-password" minLength={6} placeholder="Enter it again" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} style={{ ...s.input, paddingRight: 52 }} required />
+                <button type="button" onClick={() => setShowConfirmNewPassword(v => !v)} style={s.eyeButton} aria-label={showConfirmNewPassword ? "Hide password" : "Show password"}>{showConfirmNewPassword ? <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a2 2 0 002.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1.1-1.2 2.3-2.3 3.4M6.2 6.2C3.9 7.7 2.8 10 2.5 12c.6 1.7 2.4 4.4 5.8 5.7 1.1.4 2.3.7 3.7.7"/></svg> : <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
+              </div>
             </div>
-            <button type="submit" disabled={loading} style={{ ...styles.button, ...(loading ? styles.buttonDisabled : {}) }}>
-              {loading ? "Updating password..." : "Update Password"}
-            </button>
+            <button type="submit" disabled={loading} style={{ ...s.button, ...(loading ? s.disabledButton : {}) }}>{loading ? "Updating password…" : "Save new password"}</button>
           </form>
         ) : (
-        <form onSubmit={handleLogin} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              placeholder="you@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onFocus={(e) => Object.assign(e.target.style, styles.inputFocus)}
-              onBlur={(e) => {
-                e.target.style.borderColor = "rgba(6,182,212,0.3)";
-                e.target.style.boxShadow = "none";
-              }}
-              style={styles.input}
-              required
-            />
-          </div>
-
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Password</label>
-            <input
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onFocus={(e) => Object.assign(e.target.style, styles.inputFocus)}
-              onBlur={(e) => {
-                e.target.style.borderColor = "rgba(6,182,212,0.3)";
-                e.target.style.boxShadow = "none";
-              }}
-              style={styles.input}
-              required
-            />
-          </div>
-
-          <div style={{ textAlign: "right", marginTop: "-8px" }}>
-            <button
-              type="button"
-              onClick={() => setShowForgotPassword(true)}
-              style={styles.link}
-              onMouseEnter={(e) => Object.assign(e.target.style, styles.linkHover)}
-              onMouseLeave={(e) => { e.target.style.color = "#06b6d4"; }}
-            >
-              Forgot your password?
-            </button>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              ...styles.button,
-              ...(loading ? styles.buttonDisabled : {}),
-            }}
-            onMouseEnter={(e) => {
-              if (!loading) Object.assign(e.target.style, styles.buttonHover);
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.transform = "none";
-              e.target.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.3)";
-            }}
-          >
-            {loading ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
+          <form onSubmit={handleLogin} style={s.form}>
+            <div style={s.group}>
+              <label htmlFor="login-identifier" style={s.label}>Username or email</label>
+              <input id="login-identifier" type="text" autoComplete="username" placeholder="Your username or you@email.com" value={identifier} onChange={(e) => setIdentifier(e.target.value)} style={s.input} required />
+            </div>
+            <div style={s.group}>
+              <label htmlFor="login-password" style={s.label}>Password</label>
+              <div style={s.passwordWrap}>
+                <input id="login-password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ ...s.input, paddingRight: 52 }} required />
+                <button type="button" onClick={() => setShowPassword(v => !v)} style={s.eyeButton} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a2 2 0 002.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1.1-1.2 2.3-2.3 3.4M6.2 6.2C3.9 7.7 2.8 10 2.5 12c.6 1.7 2.4 4.4 5.8 5.7 1.1.4 2.3.7 3.7.7"/></svg> : <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
+              </div>
+            </div>
+            <div style={s.inlineLinkRow}>
+              <button type="button" onClick={() => { setError(""); setShowForgotPassword(true); }} style={s.linkButton}>Forgot your password?</button>
+            </div>
+            <button type="submit" disabled={loading} style={{ ...s.button, ...(loading ? s.disabledButton : {}) }}>{loading ? "Signing in…" : "Sign In"}</button>
+          </form>
         )}
 
-        {!isRecovery && <div style={styles.footer}>
-          Don't have an account?{" "}
-          <button
-            onClick={() => setShowSignUp(true)}
-            style={styles.link}
-            onMouseEnter={(e) => Object.assign(e.target.style, styles.linkHover)}
-            onMouseLeave={(e) => {
-              e.target.style.color = "#06b6d4";
-            }}
-          >
-            Sign Up
-          </button>
-        </div>}
-      </div>
-    </div>
+        {!isRecovery && (
+          <div style={s.footer}>
+            New to Vocabulist? <button type="button" onClick={() => setShowSignUp(true)} style={s.linkButton}>Create an account (Sign Up)</button>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
-
 
 export default Login;
