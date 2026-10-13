@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { supabase } from "../supabaseClient";
 import Login from "./Login";
+import ForgotPassword from "./ForgotPassword";
 
 
 function SignUp() {
@@ -12,6 +13,7 @@ function SignUp() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
 
   const handleSignUp = async (e) => {
@@ -28,8 +30,8 @@ function SignUp() {
     }
 
 
-    if (username.trim().length < 3 || username.trim().length > 20) {
-      setError("Username must be between 3 and 20 characters!");
+    if (username.length < 3) {
+      setError("Username must be at least 3 characters!");
       setLoading(false);
       return;
     }
@@ -50,20 +52,6 @@ function SignUp() {
 
 
     try {
-      // Make sure the username is not already taken (case-insensitive)
-      const { data: available, error: availError } = await supabase.rpc(
-        "username_available",
-        { name: username.trim() }
-      );
-
-      if (availError) {
-        console.error("Username check failed:", availError);
-      } else if (available === false) {
-        setError("This username is already taken. Please choose another one.");
-        setLoading(false);
-        return;
-      }
-
       // Register user
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -115,6 +103,10 @@ function SignUp() {
     setLoading(false);
   };
 
+
+  if (showForgotPassword) {
+    return <ForgotPassword onBack={() => setShowForgotPassword(false)} />;
+  }
 
   if (showLogin) {
     return <Login />;
@@ -366,6 +358,18 @@ function SignUp() {
           </button>
         </form>
 
+
+        <div style={{ ...styles.footer, marginTop: "16px" }}>
+          <button
+            type="button"
+            onClick={() => setShowForgotPassword(true)}
+            style={styles.link}
+            onMouseEnter={(e) => Object.assign(e.target.style, styles.linkHover)}
+            onMouseLeave={(e) => { e.target.style.color = "#06b6d4"; }}
+          >
+            Forgot your password?
+          </button>
+        </div>
 
         <div style={styles.footer}>
           Already have an account?{" "}

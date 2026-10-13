@@ -11,6 +11,13 @@ function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [isRecovery, setIsRecovery] = useState(
+    window.location.search.includes("resetPassword=true") ||
+    window.location.hash.includes("type=recovery")
+  );
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [recoveryMessage, setRecoveryMessage] = useState("");
 
 
   useEffect(() => {
@@ -25,7 +32,11 @@ function Login() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setIsRecovery(true);
+        setError("");
+      }
       setSession(session);
     });
 
@@ -76,15 +87,47 @@ function Login() {
   };
 
 
-  if (showSignUp) {
+  if (showSignUp && !isRecovery) {
     return <SignUp />;
   }
 
 
-  if (session) {
+  if (session && !isRecovery) {
     return <Home />;
   }
 
+
+
+
+  const handlePasswordUpdate = async (e) => {
+    e.preventDefault();
+    setError("");
+    setRecoveryMessage("");
+
+    if (newPassword.length < 6) {
+      setError("Password must be at least 6 characters!");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError("Passwords do not match!");
+      return;
+    }
+
+    setLoading(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setRecoveryMessage("Your password has been updated. Redirecting to Vocabulist...");
+    window.history.replaceState({}, document.title, window.location.pathname);
+    setIsRecovery(false);
+    setNewPassword("");
+    setConfirmNewPassword("");
+  };
 
   const styles = {
     container: {
@@ -215,12 +258,26 @@ function Login() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>🎮 Vocabulist</h1>
-        <p style={styles.subtitle}>Welcome Back</p>
-
+        <p style={styles.subtitle}>{isRecovery ? "Choose a New Password" : "Welcome Back"}</p>
 
         {error && <div style={styles.error}>❌ {error}</div>}
+        {recoveryMessage && <div style={{ ...styles.error, background: "rgba(34,197,94,0.15)", borderColor: "rgba(34,197,94,0.3)", color: "#bbf7d0" }} role="status">✅ {recoveryMessage}</div>}
 
-
+        {isRecovery ? (
+          <form onSubmit={handlePasswordUpdate} style={styles.form}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>New password</label>
+              <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={styles.input} required minLength={6} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Confirm new password</label>
+              <input type="password" autoComplete="new-password" placeholder="Enter the new password again" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} style={styles.input} required minLength={6} />
+            </div>
+            <button type="submit" disabled={loading} style={{ ...styles.button, ...(loading ? styles.buttonDisabled : {}) }}>
+              {loading ? "Updating password..." : "Update Password"}
+            </button>
+          </form>
+        ) : (
         <form onSubmit={handleLogin} style={styles.form}>
           <div style={styles.formGroup}>
             <label style={styles.label}>Email</label>
@@ -276,9 +333,9 @@ function Login() {
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
+        )}
 
-
-        <div style={styles.footer}>
+        {!isRecovery && <div style={styles.footer}>
           Don't have an account?{" "}
           <button
             onClick={() => setShowSignUp(true)}
@@ -290,7 +347,7 @@ function Login() {
           >
             Sign Up
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   );
