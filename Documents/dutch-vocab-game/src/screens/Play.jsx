@@ -150,6 +150,7 @@ function Play({ goBack }) {
   const [bonusPop, setBonusPop] = useState(null); // { id, text }
   const [heartHit, setHeartHit] = useState(null); // { index, id }
   const [heartGained, setHeartGained] = useState(false);
+  const sessionSavedRef = useRef(false); // a game is saved only once
   const [shownScore, setShownScore] = useState(0);
   const shownRef = useRef(0);
   const targetScore = totalSessionScore + score;
@@ -516,6 +517,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     }));
 
     if (nextLevelNumber > 100) {
+      saveSessionAuto(totalSessionScore + levelScore + levelBonus, allSessionResults);
       setTotalSessionScore(totalSessionScore + levelScore + levelBonus);
       setGameOver(true);
       setLevelCompleted(false);
@@ -572,6 +574,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
   };
 
   const saveSessionAuto = async (finalScore, results) => {
+    if (sessionSavedRef.current || results.length === 0) return;
+    sessionSavedRef.current = true;
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user.id;
@@ -583,6 +587,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           score: finalScore,
           correct_answers: correctCount,
           total_words: results.length,
+          created_at: new Date().toISOString(),
           ended_at: new Date(),
           level: currentLevel,
         },
@@ -654,6 +659,14 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     } catch (error) {
       console.error("Error saving session:", error);
     }
+  };
+
+  // Leaving mid-game: save the points earned so far, then go back
+  const handleExit = async () => {
+    if (!gameOver) {
+      await saveSessionAuto(totalSessionScore + score, allSessionResults);
+    }
+    goBack();
   };
 
   const startNewGame = () => {
@@ -879,7 +892,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
-            onClick={goBack}
+            onClick={handleExit}
             style={styles.backButton}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = "#0891b2";

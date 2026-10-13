@@ -33,67 +33,24 @@ function Leaderboard({ onUserClick, goBack }) {
   // ============================================================================
   const getTodayStart = () => {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}T00:00:00+00:00`;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   };
 
 
   const getWeekStart = () => {
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const weekStartDate = new Date(now);
-    weekStartDate.setDate(now.getDate() - daysToSubtract);
-    
-    const year = weekStartDate.getFullYear();
-    const month = String(weekStartDate.getMonth() + 1).padStart(2, '0');
-    const day = String(weekStartDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}T00:00:00+00:00`;
+    const daysSinceMonday = (now.getDay() + 6) % 7; // week starts on Monday
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - daysSinceMonday
+    ).toISOString();
   };
 
 
   const getMonthStart = () => {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    return `${year}-${month}-01T00:00:00+00:00`;
-  };
-
-
-
-  // ============================================================================
-  // FUNCTION: Award medals to top 3 users
-  // ============================================================================
-  const awardMedals = async (table, topUsers) => {
-    if (topUsers.length === 0) return;
-
-
-    const medals = [
-      { user_id: topUsers[0]?.user_id, medal_type: "gold" },
-      { user_id: topUsers[1]?.user_id, medal_type: "silver" },
-      { user_id: topUsers[2]?.user_id, medal_type: "bronze" },
-    ].filter((m) => m.user_id);
-
-
-    for (const medal of medals) {
-      const { data: existing } = await supabase
-        .from(table)
-        .select("id")
-        .eq("user_id", medal.user_id)
-        .eq("medal_type", medal.medal_type)
-        .single();
-
-
-      if (!existing) {
-        await supabase.from(table).insert({
-          user_id: medal.user_id,
-          medal_type: medal.medal_type,
-          awarded_at: new Date().toISOString(),
-        });
-      }
-    }
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   };
 
 
@@ -162,17 +119,8 @@ function Leaderboard({ onUserClick, goBack }) {
       }
 
 
-      // Award medals for today/week/month
-      if (activeTab === "today") {
-        const topToday = leaderboardData.slice(0, 3);
-        await awardMedals("daily_medals", topToday);
-      } else if (activeTab === "thisWeek") {
-        const topWeek = leaderboardData.slice(0, 3);
-        await awardMedals("weekly_medals", topWeek);
-      } else if (activeTab === "thisMonth") {
-        const topMonth = leaderboardData.slice(0, 3);
-        await awardMedals("monthly_medals", topMonth);
-      }
+      // Medals are awarded automatically by the database at the end of each
+      // day / week / month (see medals_setup.sql).
 
 
       leaderboardData = leaderboardData.slice(0, 10);
