@@ -40,7 +40,7 @@ function SignUp() {
         if (profileError) {
           console.error("Error saving profile:", profileError);
           if (profileError.code === "23505") {
-            setError("That username is already in use. Your account was created, but the username could not be saved. Please contact support to finish setting up the account.");
+            setError("That username is already taken. Try another one.");
           } else {
             setError("Your account was created, but we couldn't save your username. Please contact support before signing in with it.");
           }
@@ -66,7 +66,7 @@ function SignUp() {
         <AuthBrand />
         <p style={s.eyebrow}>NEW ACCOUNT</p>
         <h1 style={s.title}>Create your account</h1>
-        <p style={s.description}>Register once to save your progress and practise whenever you like.</p>
+        <p style={s.description}>Save your progress and keep learning.</p>
 
         {error && <div role="alert" style={{ ...s.message, ...s.error }}>{error}</div>}
         {success && <div role="status" style={{ ...s.message, ...s.success }}>Registration complete! Taking you to Sign In…</div>}
@@ -75,7 +75,6 @@ function SignUp() {
           <div style={s.group}>
             <label htmlFor="signup-username" style={s.label}>Username</label>
             <input id="signup-username" type="text" autoComplete="username" minLength={3} maxLength={24} placeholder="Choose a username" value={username} onChange={(e) => setUsername(e.target.value)} style={s.input} required />
-            <span style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>3–24 characters; letters, numbers, dots, hyphens, and underscores.</span>
           </div>
           <div style={s.group}>
             <label htmlFor="signup-email" style={s.label}>Email address</label>

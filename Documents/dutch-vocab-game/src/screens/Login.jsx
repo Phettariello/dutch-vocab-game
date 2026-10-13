@@ -62,8 +62,13 @@ function Login() {
         const { data, error: functionError } = await supabase.functions.invoke("login-with-username", {
           body: { username: value, password },
         });
-        if (functionError) throw new Error("Username sign-in is not configured yet. Please try your email or contact support.");
+        // Supabase may set functionError for expected 401 responses too; prefer the
+        // useful error body returned by our Edge Function before the generic error.
         if (data?.error) throw new Error(data.error);
+        if (functionError) {
+          console.error("Username sign-in function error:", functionError);
+          throw new Error("Username login is temporarily unavailable. Try signing in with your email.");
+        }
         if (!data?.session?.access_token || !data?.session?.refresh_token) {
           throw new Error("Could not sign in with that username and password. Check your details and try again.");
         }
