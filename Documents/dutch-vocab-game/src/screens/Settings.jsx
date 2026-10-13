@@ -8,6 +8,9 @@ function Settings({ goBack }) {
   const [soundEnabled, setSoundEnabled] = useState(
     localStorage.getItem("soundEnabled") !== "false"
   );
+  const [backgroundMusicEnabled, setBackgroundMusicEnabled] = useState(
+    localStorage.getItem("backgroundMusicEnabled") !== "false"
+  );
   const [volume, setVolume] = useState(
     parseFloat(localStorage.getItem("volume")) || 70
   );
@@ -41,6 +44,13 @@ function Settings({ goBack }) {
     localStorage.setItem("soundEnabled", soundEnabled);
     localStorage.setItem("volume", volume);
   }, [soundEnabled, volume]);
+
+  const handleBackgroundMusicToggle = () => {
+    const nextEnabled = !backgroundMusicEnabled;
+    setBackgroundMusicEnabled(nextEnabled);
+    localStorage.setItem("backgroundMusicEnabled", String(nextEnabled));
+    window.dispatchEvent(new Event("background-music-setting-changed"));
+  };
 
   const playTestSound = (type) => {
     if (!soundEnabled) {
@@ -465,6 +475,33 @@ function Settings({ goBack }) {
         {/* AUDIO SETTINGS */}
         <div style={styles.section}>
           <h2 style={styles.sectionTitle}>🔊 Audio</h2>
+
+          <div style={styles.settingItem}>
+            <div>
+              <div style={styles.settingLabel}>Background Music</div>
+              <div style={{ fontSize: "12px", color: "#bfdbfe", marginTop: "4px" }}>
+                Soft classical piano while you use Vocabulist
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={backgroundMusicEnabled}
+              aria-label="Background music"
+              style={{
+                ...styles.toggle,
+                background: backgroundMusicEnabled ? "#06b6d4" : "#666",
+              }}
+              onClick={handleBackgroundMusicToggle}
+            >
+              <div
+                style={{
+                  ...styles.toggleInner,
+                  left: backgroundMusicEnabled ? "26px" : "2px",
+                }}
+              />
+            </button>
+          </div>
 
           <div style={styles.settingItem}>
             <div style={styles.settingLabel}>Sound Effects</div>

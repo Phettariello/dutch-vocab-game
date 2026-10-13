@@ -128,7 +128,15 @@ function PlayGame({ goBack, onRestart }) {
   const [words, setWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answer, setAnswer] = useState("");
+  const [answerLocked, setAnswerLocked] = useState(false);
+  // Ref blocks rapid repeated submits immediately, before React re-renders.
+  const answerLockedRef = useRef(false);
   const [feedback, setFeedback] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportedWord, setReportedWord] = useState(null);
+  const [reportComment, setReportComment] = useState("");
+  const [reportStatus, setReportStatus] = useState("");
+  const [lastAnswerWrong, setLastAnswerWrong] = useState(false);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(5);
   const [streak, setStreak] = useState(0);
@@ -360,9 +368,38 @@ const fetchWordsForLevel = async (levelNumber) => {
 
   const currentWord = words[currentIndex];
 
+  const submitWordIssueReport = async (e) => {
+    e.preventDefault();
+    const comment = reportComment.trim();
+    if (!comment) { setReportStatus("Please add a comment."); return; }
+    setReportStatus("Submitting...");
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) { setReportStatus("Please sign in again to submit a report."); return; }
+      const { error } = await supabase.from("word_issue_reports").insert({
+        user_id: userData.user.id,
+        english_word: reportedWord?.english ?? currentWord.english,
+        dutch_word: reportedWord?.dutch ?? currentWord.dutch,
+        comment,
+      });
+      if (error) throw error;
+      setReportStatus("Report submitted. Thank you!");
+      setReportComment("");
+      setTimeout(() => { setReportOpen(false); setReportStatus(""); }, 1400);
+    } catch (error) {
+      console.error("Word issue report failed:", error);
+      setReportStatus("Couldn't submit. Please try again.");
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
+    // A question can be scored only once, including when the answer is blank.
+    if (answerLockedRef.current || gameOver || levelCompleted || loading) return;
+    answerLockedRef.current = true;
+    setAnswerLocked(true);
     const userAnswer = answer.toLowerCase().trim();
+    setLastAnswerWrong(false);
 
 const normalizeDutch = (str) => {
   return str
@@ -437,6 +474,9 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       newLives -= 1;
       newStreak = 0;
       setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
+      // Capture the missed word now; currentWord changes when the next round starts.
+      setReportedWord({ english: currentWord.english, dutch: currentWord.dutch });
+      setLastAnswerWrong(true);
     }
 
     if (isCorrect) {
@@ -490,15 +530,15 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         setFinalScore(finalPoints);
         saveSessionAuto(finalPoints, [...allSessionResults, newSessionResult]);
         setGameOver(true);
-      }, 2000);
+      }, isCorrect ? 2000 : 8000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
       setTimeout(() => {
         nextLevel(newScore, newQuestionsInLevel, newLives);
-      }, 2000);
+      }, isCorrect ? 2000 : 8000);
     } else if (currentIndex >= words.length - 1) {
       setTimeout(() => {
         nextLevel(newScore, newQuestionsInLevel, newLives);
-      }, 2000);
+      }, isCorrect ? 2000 : 8000);
     } else {
       setTimeout(() => {
         const nextIndex = currentIndex + 1;
@@ -521,7 +561,10 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           }
         }
         setFeedback("");
-      }, 2000);
+        setLastAnswerWrong(false);
+        answerLockedRef.current = false;
+        setAnswerLocked(false);
+      }, isCorrect ? 2000 : 8000);
     }
   };
 
@@ -570,6 +613,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       setCurrentIndex(0);
       setAnswer("");
       setFeedback("");
+      answerLockedRef.current = false;
+      setAnswerLocked(false);
       setScore(0);
       setStreak(0);
       setQuestionsInLevel(0);
@@ -1062,23 +1107,39 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
               ? styles.inputWrong
               : {}),
           }}
-          disabled={gameOver}
+          disabled={gameOver || answerLocked || levelCompleted || loading}
           autoFocus
         />
-        <button type="submit" style={styles.submitButton} disabled={gameOver}>
+        <button type="submit" style={styles.submitButton} disabled={gameOver || answerLocked || levelCompleted || loading}>
           Submit
         </button>
       </form>
 
       {feedback && (
-        <p
-          style={{
-            ...styles.feedback,
-            color: feedback.includes("✅") ? "#10b981" : "#ef4444",
-          }}
-        >
+        <p style={{ ...styles.feedback, color: feedback.includes("✅") ? "#10b981" : "#ef4444" }}>
           {feedback}
         </p>
+      )}
+
+      {lastAnswerWrong && !reportOpen && (
+        <div style={{ textAlign: "center", padding: "0 16px 14px" }}>
+          <button type="button" onClick={() => setReportOpen(true)} style={styles.reportIssueButton}>⚑ Report issue</button>
+        </div>
+      )}
+
+      {reportOpen && (
+        <form onSubmit={submitWordIssueReport} style={styles.reportForm}>
+          <h3 style={styles.reportTitle}>Report a word issue</h3>
+          <p style={styles.reportWord}><strong>{reportedWord?.english ?? currentWord.english}</strong> → {reportedWord?.dutch ?? currentWord.dutch}</p>
+          <textarea value={reportComment} onChange={(e) => setReportComment(e.target.value)}
+            placeholder="What's wrong with this word or translation?" maxLength={1000}
+            required rows={3} style={styles.reportTextarea} />
+          <div style={styles.reportActions}>
+            <button type="button" onClick={() => { setReportOpen(false); setReportStatus(""); }} style={styles.reportCancelButton}>Cancel</button>
+            <button type="submit" style={styles.reportSubmitButton}>Submit report</button>
+          </div>
+          {reportStatus && <p style={styles.reportStatus} role="status">{reportStatus}</p>}
+        </form>
       )}
     </div>
   );
@@ -1609,6 +1670,15 @@ const styles = {
     flex: "1 1 140px",
     minWidth: "120px",
   },
+  reportIssueButton: { padding: "8px 12px", fontSize: "13px", fontWeight: "600", background: "rgba(255,255,255,0.1)", color: "#bfdbfe", border: "1px solid rgba(147,197,253,0.5)", borderRadius: "8px", cursor: "pointer" },
+  reportForm: { margin: "0 16px 16px", padding: "14px", border: "1px solid rgba(147,197,253,0.45)", borderRadius: "10px", background: "rgba(15,23,42,0.96)", color: "white" },
+  reportTitle: { margin: "0 0 8px", fontSize: "16px" },
+  reportWord: { margin: "0 0 10px", color: "#bfdbfe", fontSize: "14px" },
+  reportTextarea: { width: "100%", boxSizing: "border-box", padding: "10px", minHeight: "96px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#ffffff", font: "inherit", resize: "vertical", color: "#111827", caretColor: "#111827", outlineColor: "#2563eb", colorScheme: "light" },
+  reportActions: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "10px" },
+  reportCancelButton: { padding: "9px 12px", borderRadius: "7px", border: "1px solid #64748b", color: "white", background: "transparent", cursor: "pointer" },
+  reportSubmitButton: { padding: "9px 12px", borderRadius: "7px", border: "none", color: "white", background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)", fontWeight: "700", cursor: "pointer" },
+  reportStatus: { margin: "10px 0 0", fontSize: "13px", color: "#bfdbfe" },
   loadingContainer: {
     minHeight: "100vh",
     display: "flex",
