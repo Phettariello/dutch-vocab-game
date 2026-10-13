@@ -10,6 +10,7 @@ function Leaderboard({ onUserClick, goBack }) {
   const [usernames, setUsernames] = useState({});
   const [medalLeaderboard, setMedalLeaderboard] = useState([]);
   const [medalType, setMedalType] = useState("daily");
+  const [loadError, setLoadError] = useState("");
 
 
 
@@ -60,23 +61,25 @@ function Leaderboard({ onUserClick, goBack }) {
   // ============================================================================
   const fetchLeaderboard = async () => {
     setLoading(true);
+    setLoadError("");
     try {
       let query = supabase.from("sessions").select("*");
 
 
       if (activeTab === "today") {
         const todayStart = getTodayStart();
-        query = query.gte("created_at", todayStart);
+        query = query.gte("started_at", todayStart);
       } else if (activeTab === "thisWeek") {
         const weekStart = getWeekStart();
-        query = query.gte("created_at", weekStart);
+        query = query.gte("started_at", weekStart);
       } else if (activeTab === "thisMonth") {
         const monthStart = getMonthStart();
-        query = query.gte("created_at", monthStart);
+        query = query.gte("started_at", monthStart);
       }
 
 
-      const { data } = await query.order("score", { ascending: false });
+      const { data, error } = await query.order("score", { ascending: false });
+      if (error) throw error;
 
 
       const userStats = {};
@@ -143,6 +146,8 @@ function Leaderboard({ onUserClick, goBack }) {
       setLeaderboard(leaderboardData);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
+      setLeaderboard([]);
+      setLoadError(error.message || "Could not load the leaderboard");
     } finally {
       setLoading(false);
     }
@@ -786,7 +791,9 @@ function Leaderboard({ onUserClick, goBack }) {
           )
         ) : leaderboard.length === 0 ? (
           <div style={styles.emptyState}>
-            No scores yet. Be the first to play! 🎮
+            {loadError
+              ? `⚠️ Could not load scores: ${loadError}`
+              : "No scores yet. Be the first to play! 🎮"}
           </div>
         ) : activeTab === "words" ? (
           renderScoresTable(["", "Player", "Mastered", "Total"], "20px 1fr 70px 70px")

@@ -377,7 +377,7 @@ function userProfile({ userId, username, onClose }) {
                         {session.score?.toLocaleString()} pts
                       </div>
                       <div style={styles.sessionDate}>
-                        📈 Level {session.level} • {formatDate(session.created_at)}
+                        📈 Level {session.level} • {formatDate(session.started_at)}
                       </div>
                     </div>
                   ))}

@@ -29,6 +29,11 @@ const ANIMATIONS = `
   60%      { transform: translateX(-5px); }
   80%      { transform: translateX(5px); }
 }
+@keyframes splashPop {
+  0%   { opacity: 0; transform: scale(0.3); }
+  60%  { opacity: 1; transform: scale(1.2); }
+  100% { opacity: 1; transform: scale(1); }
+}
 @keyframes confettiFall {
   0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
   100% { transform: translateY(110vh) rotate(720deg); opacity: 0.9; }
@@ -119,7 +124,7 @@ function Confetti() {
   );
 }
 
-function Play({ goBack }) {
+function PlayGame({ goBack, onRestart }) {
   const [words, setWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answer, setAnswer] = useState("");
@@ -151,6 +156,10 @@ function Play({ goBack }) {
   const [heartHit, setHeartHit] = useState(null); // { index, id }
   const [heartGained, setHeartGained] = useState(false);
   const sessionSavedRef = useRef(false); // a game is saved only once
+  const [finalScore, setFinalScore] = useState(0);
+  const [summaryVisible, setSummaryVisible] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null); // "saving" | "saved" | "error"
+  const [saveErrorMsg, setSaveErrorMsg] = useState("");
   const [shownScore, setShownScore] = useState(0);
   const shownRef = useRef(0);
   const targetScore = totalSessionScore + score;
@@ -323,6 +332,13 @@ const fetchWordsForLevel = async (levelNumber) => {
     return () => vv.removeEventListener("resize", check);
   }, []);
 
+  // After the game ends: show the splash for a moment, then the overview
+  useEffect(() => {
+    if (!gameOver || summaryVisible) return;
+    const t = setTimeout(() => setSummaryVisible(true), 2500);
+    return () => clearTimeout(t);
+  }, [gameOver, summaryVisible]);
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
@@ -470,7 +486,9 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
     if (newLives <= 0) {
       setTimeout(() => {
-        saveSessionAuto(newScore + totalSessionScore, allSessionResults);
+        const finalPoints = newScore + totalSessionScore;
+        setFinalScore(finalPoints);
+        saveSessionAuto(finalPoints, [...allSessionResults, newSessionResult]);
         setGameOver(true);
       }, 2000);
     } else if (newQuestionsInLevel >= QUESTIONS_PER_LEVEL) {
@@ -517,7 +535,9 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     }));
 
     if (nextLevelNumber > 100) {
-      saveSessionAuto(totalSessionScore + levelScore + levelBonus, allSessionResults);
+      const finalPoints = totalSessionScore + levelScore + levelBonus;
+      setFinalScore(finalPoints);
+      saveSessionAuto(finalPoints, allSessionResults);
       setTotalSessionScore(totalSessionScore + levelScore + levelBonus);
       setGameOver(true);
       setLevelCompleted(false);
@@ -576,6 +596,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
   const saveSessionAuto = async (finalScore, results) => {
     if (sessionSavedRef.current || results.length === 0) return;
     sessionSavedRef.current = true;
+    setSaveStatus("saving");
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user.id;
@@ -587,7 +608,6 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           score: finalScore,
           correct_answers: correctCount,
           total_words: results.length,
-          created_at: new Date().toISOString(),
           ended_at: new Date(),
           level: currentLevel,
         },
@@ -595,8 +615,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
       if (sessionError) {
         console.error("Session save error:", sessionError);
+        setSaveStatus("error");
+        setSaveErrorMsg(sessionError.message || "Unknown error");
         return;
       }
+      setSaveStatus("saved");
 
       const uniqueWords = new Map();
       for (const result of results) {
@@ -658,6 +681,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       console.log("Session saved automatically!");
     } catch (error) {
       console.error("Error saving session:", error);
+      setSaveStatus("error");
+      setSaveErrorMsg(error.message || "Unknown error");
     }
   };
 
@@ -670,7 +695,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
   };
 
   const startNewGame = () => {
-    window.location.reload();
+    onRestart();
   };
 
   const renderHearts = () => {
@@ -769,7 +794,6 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
   if (gameOver) {
     const correctCount = allSessionResults.filter((r) => r.correct).length;
-    const finalScore = totalSessionScore;
     const accuracy =
       allSessionResults.length > 0
         ? Math.round((correctCount / allSessionResults.length) * 100)
@@ -806,13 +830,39 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       (a, b) => b.attempts - a.attempts
     );
 
+    const lost = lives <= 0;
+
+    // Step 1: "Game Over" splash (tap to skip)
+    if (!summaryVisible) {
+      return (
+        <div style={styles.splashContainer} onClick={() => setSummaryVisible(true)}>
+          <style>{ANIMATIONS}</style>
+          {!lost && <Confetti />}
+          <div style={{ fontSize: "72px", animation: "splashPop 0.7s ease-out" }}>
+            {lost ? "💔" : "🏆"}
+          </div>
+          <h1
+            style={{
+              ...styles.splashTitle,
+              color: lost ? "#fca5a5" : "#fbbf24",
+              animation: "splashPop 0.7s ease-out",
+            }}
+          >
+            {lost ? "GAME OVER" : "YOU WON!"}
+          </h1>
+          <p style={styles.splashScore}>{finalScore.toLocaleString()} pts</p>
+          <p style={styles.splashHint}>Tap to continue</p>
+        </div>
+      );
+    }
+
+    // Step 2: overview
     return (
       <div style={styles.gameOverContainer}>
         <div style={styles.gameOverHeader}>
-          <h1 style={styles.gameOverTitle}>Game Over</h1>
-          <button onClick={goBack} style={styles.backButtonGameOver}>
-            ← Menu
-          </button>
+          <h1 style={{ ...styles.gameOverTitle, textAlign: "center" }}>
+            {lost ? "Game Over" : "You Won! 🏆"}
+          </h1>
         </div>
 
         <div style={styles.statsGrid}>
@@ -835,6 +885,26 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
             <p style={styles.statLabel}>Correct</p>
           </div>
         </div>
+
+        {saveStatus && (
+          <p
+            style={{
+              ...styles.saveStatus,
+              color:
+                saveStatus === "error"
+                  ? "#fca5a5"
+                  : saveStatus === "saved"
+                  ? "#86efac"
+                  : "#bfdbfe",
+            }}
+          >
+            {saveStatus === "saved"
+              ? "✅ Score saved to the leaderboard"
+              : saveStatus === "error"
+              ? `⚠️ Score could not be saved: ${saveErrorMsg}`
+              : "Saving score…"}
+          </p>
+        )}
 
         {missedWords.length > 0 && (
           <div style={styles.missedWordsSection}>
@@ -1353,6 +1423,42 @@ const styles = {
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     overflowY: "auto",
   },
+  splashContainer: {
+    minHeight: "100vh",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    padding: "20px",
+    cursor: "pointer",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+  splashTitle: {
+    fontSize: "clamp(40px, 12vw, 64px)",
+    fontWeight: "900",
+    letterSpacing: "3px",
+    margin: "12px 0 6px",
+    textShadow: "0 4px 20px rgba(0,0,0,0.5)",
+  },
+  splashScore: {
+    fontSize: "22px",
+    fontWeight: "700",
+    color: "#fbbf24",
+    margin: "0",
+  },
+  splashHint: {
+    fontSize: "13px",
+    color: "#93c5fd",
+    marginTop: "28px",
+  },
+  saveStatus: {
+    textAlign: "center",
+    fontSize: "13px",
+    fontWeight: "600",
+    margin: "0 0 14px",
+  },
   gameOverHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -1520,5 +1626,17 @@ const styles = {
     margin: "0",
   },
 };
+
+// Wrapper: "New Game" remounts PlayGame, which resets everything cleanly
+function Play({ goBack }) {
+  const [round, setRound] = useState(0);
+  return (
+    <PlayGame
+      key={round}
+      goBack={goBack}
+      onRestart={() => setRound((r) => r + 1)}
+    />
+  );
+}
 
 export default Play;
