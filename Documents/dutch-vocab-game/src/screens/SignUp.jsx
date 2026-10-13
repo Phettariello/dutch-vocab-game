@@ -28,8 +28,8 @@ function SignUp() {
     }
 
 
-    if (username.length < 3) {
-      setError("Username must be at least 3 characters!");
+    if (username.trim().length < 3 || username.trim().length > 20) {
+      setError("Username must be between 3 and 20 characters!");
       setLoading(false);
       return;
     }
@@ -50,6 +50,20 @@ function SignUp() {
 
 
     try {
+      // Make sure the username is not already taken (case-insensitive)
+      const { data: available, error: availError } = await supabase.rpc(
+        "username_available",
+        { name: username.trim() }
+      );
+
+      if (availError) {
+        console.error("Username check failed:", availError);
+      } else if (available === false) {
+        setError("This username is already taken. Please choose another one.");
+        setLoading(false);
+        return;
+      }
+
       // Register user
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,

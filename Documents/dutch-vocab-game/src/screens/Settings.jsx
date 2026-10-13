@@ -80,15 +80,22 @@ function Settings({ goBack }) {
   };
 
   const handleUpdateUsername = async () => {
-    if (!username.trim()) {
+    const newName = username.trim();
+
+    if (!newName) {
       setMessage("Username cannot be empty");
+      return;
+    }
+
+    if (newName.length < 3 || newName.length > 20) {
+      setMessage("Username must be between 3 and 20 characters");
       return;
     }
 
     try {
       const { error } = await supabase
         .from("profiles")
-        .update({ username: username.trim() })
+        .update({ username: newName })
         .eq("user_id", user.id);
 
       if (error) throw error;
@@ -96,7 +103,11 @@ function Settings({ goBack }) {
       setIsEditingUsername(false);
       setTimeout(() => setMessage(""), 3000);
     } catch (error) {
-      setMessage("❌ Error updating username: " + error.message);
+      setMessage(
+        error.code === "23505"
+          ? "❌ That username is already taken. Please choose another one."
+          : "❌ Error updating username: " + error.message
+      );
       setTimeout(() => setMessage(""), 3000);
     }
   };
