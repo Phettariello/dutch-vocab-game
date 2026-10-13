@@ -39,6 +39,8 @@ body {
 #root {
   width: 100%;
   min-height: 100vh;
+  margin: 0;
+  padding: 0;
 }
 
 /* iOS zooms into any field with a font size under 16px.

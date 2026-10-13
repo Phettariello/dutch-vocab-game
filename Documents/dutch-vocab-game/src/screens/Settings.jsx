@@ -541,49 +541,48 @@ function Settings({ goBack }) {
 
         {/* ABOUT SECTION */}
         <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>ℹ️ About</h2>
+          <h2 style={styles.sectionTitle}>ℹ️ About Vocabulist</h2>
+          <p style={{ color: "#bfdbfe", fontSize: "14px", lineHeight: 1.6, margin: "0 0 16px" }}>
+            Vocabulist helps you build your Dutch vocabulary through short, repeatable practice sessions.
+          </p>
 
           <div style={styles.settingItem}>
             <div>
-              <div style={styles.settingLabel}>App Version</div>
-              <div style={{ fontSize: "12px", color: "#bfdbfe", marginTop: "4px" }}>
-                1.0.0
+              <div style={styles.settingLabel}>🎮 Play</div>
+              <div style={{ color: "#bfdbfe", fontSize: "13px", lineHeight: 1.5, marginTop: "4px" }}>
+                Test your recall with English-to-Dutch questions and build your progress level by level.
               </div>
             </div>
           </div>
-
           <div style={styles.settingItem}>
             <div>
-              <div style={styles.settingLabel}>Privacy Policy</div>
+              <div style={styles.settingLabel}>📝 Review Mode</div>
+              <div style={{ color: "#bfdbfe", fontSize: "13px", lineHeight: 1.5, marginTop: "4px" }}>
+                Revisit words you missed so you can strengthen your memory.
+              </div>
             </div>
-            <a
-              href="/privacy"
-              style={{
-                color: "#06b6d4",
-                textDecoration: "none",
-                fontSize: "13px",
-                fontWeight: "600",
-              }}
-            >
-              Read →
-            </a>
           </div>
-
           <div style={styles.settingItem}>
             <div>
-              <div style={styles.settingLabel}>Terms of Service</div>
+              <div style={styles.settingLabel}>📚 Practice Mode</div>
+              <div style={{ color: "#bfdbfe", fontSize: "13px", lineHeight: 1.5, marginTop: "4px" }}>
+                Practise vocabulary at your own pace, without the pressure of a timed test.
+              </div>
             </div>
-            <a
-              href="/terms"
-              style={{
-                color: "#06b6d4",
-                textDecoration: "none",
-                fontSize: "13px",
-                fontWeight: "600",
-              }}
-            >
-              Read →
-            </a>
+          </div>
+          <div style={styles.settingItem}>
+            <div>
+              <div style={styles.settingLabel}>📖 Your Words & Achievements</div>
+              <div style={{ color: "#bfdbfe", fontSize: "13px", lineHeight: 1.5, marginTop: "4px" }}>
+                Keep track of vocabulary and see the progress you have made.
+              </div>
+            </div>
+          </div>
+          <div style={styles.settingItem}>
+            <div>
+              <div style={styles.settingLabel}>App Version</div>
+              <div style={{ fontSize: "12px", color: "#bfdbfe", marginTop: "4px" }}>1.0.0</div>
+            </div>
           </div>
         </div>
       </div>

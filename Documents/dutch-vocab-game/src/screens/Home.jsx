@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import "./App.css";
 import Play from "./Play";
 import Review from "./Review";
 import YourWords from "./YourWords";
@@ -53,80 +54,7 @@ function Home() {
     );
   if (screen === "settings") return <Settings goBack={() => setScreen("menu")} />;
 
-  // Menu principale
-  const styles = {
-    container: {
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-      padding: "40px 20px",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    header: {
-      textAlign: "center",
-      marginBottom: "50px",
-      color: "white",
-    },
-    title: {
-      fontSize: "52px",
-      fontWeight: "800",
-      margin: "0",
-      textShadow: "0 4px 15px rgba(6,182,212,0.4)",
-      letterSpacing: "2px",
-    },
-    subtitle: {
-      fontSize: "16px",
-      color: "#06b6d4",
-      margin: "10px 0 0 0",
-      fontWeight: "500",
-    },
-    buttonsContainer: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-      gap: "16px",
-      maxWidth: "900px",
-      width: "100%",
-      marginBottom: "40px",
-    },
-    button: {
-      padding: "20px",
-      fontSize: "16px",
-      fontWeight: "700",
-      border: "none",
-      borderRadius: "12px",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-      background: "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%)",
-      color: "white",
-      border: "1px solid rgba(6,182,212,0.3)",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "8px",
-      minHeight: "70px",
-    },
-    buttonHover: {
-      transform: "translateY(-4px)",
-      boxShadow: "0 8px 25px rgba(6,182,212,0.3)",
-    },
-    logoutButton: {
-      padding: "14px 40px",
-      fontSize: "16px",
-      fontWeight: "600",
-      background: "rgba(239, 68, 68, 0.8)",
-      color: "white",
-      border: "1px solid rgba(239, 68, 68, 1)",
-      borderRadius: "8px",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-      textAlign: "center",
-    },
-  };
-
+  // Main menu: compact single-column layout for mobile screens.
   const buttons = [
     { label: "🎮 Play", screen: "play" },
     { label: "📝 Review Mode", screen: "review" },
@@ -138,47 +66,28 @@ function Home() {
   ];
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>🌍 VOCABULIST</h1>
-        <p style={styles.subtitle}>Master Dutch Words Faster</p>
-      </div>
+    <main className="vocabulist-home">
+      <header className="vocabulist-home-header">
+        <h1 className="vocabulist-home-title">🌍 VOCABULIST</h1>
+        <p className="vocabulist-home-subtitle">Master Dutch Words Faster</p>
+      </header>
 
-      <div style={styles.buttonsContainer}>
-        {buttons.map((btn, idx) => (
+      <nav className="vocabulist-menu" aria-label="Main menu">
+        {buttons.map((btn) => (
           <button
-            key={idx}
-            style={styles.button}
+            key={btn.screen}
+            className="vocabulist-menu-button"
             onClick={() => setScreen(btn.screen)}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = styles.buttonHover.transform;
-              e.currentTarget.style.boxShadow = styles.buttonHover.boxShadow;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "none";
-              e.currentTarget.style.boxShadow = "0 4px 15px rgba(0,0,0,0.2)";
-            }}
           >
             {btn.label}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <button
-        onClick={handleLogout}
-        style={styles.logoutButton}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(239, 68, 68, 1)";
-          e.currentTarget.style.transform = "scale(1.05)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(239, 68, 68, 0.8)";
-          e.currentTarget.style.transform = "scale(1)";
-        }}
-      >
+      <button className="vocabulist-logout-button" onClick={handleLogout}>
         🚪 Logout
       </button>
-    </div>
+    </main>
   );
 }
 
