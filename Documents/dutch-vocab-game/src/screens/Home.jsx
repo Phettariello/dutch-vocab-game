@@ -8,6 +8,7 @@ import Achievements from "./Achievements";
 import Settings from "./Settings";
 import Practice from "./Practice";
 import AuthBrand from "./AuthBrand";
+import MedalPopup from "./MedalPopup";
 import { supabase } from "../supabaseClient";
 
 /**
@@ -137,7 +138,69 @@ function Home() {
     username: "",
     bestScore: 0,
     mastered: 0,
+    streak: null, // days in a row (null = unknown)
+    playedToday: false,
   });
+  const [newMedals, setNewMedals] = useState([]);
+  const shownMedalsRef = useRef(new Set()); // medals already shown in this visit
+  const screenRef = useRef("menu");
+
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
+
+  // Look for medals the player has not been told about yet
+  const checkMedals = async (uid) => {
+    try {
+      const kinds = [
+        ["daily", "daily_medals"],
+        ["weekly", "weekly_medals"],
+        ["monthly", "monthly_medals"],
+      ];
+      const results = await Promise.all(
+        kinds.map(([, table]) =>
+          supabase
+            .from(table)
+            .select("id, medal_type, period_start")
+            .eq("user_id", uid)
+            .is("seen_at", null)
+        )
+      );
+      const found = [];
+      results.forEach((res, i) => {
+        if (res.error) return; // e.g. the SQL setup has not been run yet
+        (res.data || []).forEach((m) => {
+          const key = `${kinds[i][0]}:${m.id}`;
+          if (!shownMedalsRef.current.has(key)) {
+            shownMedalsRef.current.add(key);
+            found.push({ ...m, kind: kinds[i][0] });
+          }
+        });
+      });
+      if (found.length > 0) setNewMedals((prev) => [...prev, ...found]);
+    } catch (error) {
+      console.error("Error checking medals:", error);
+    }
+  };
+
+  const handleCloseMedals = () => {
+    setNewMedals([]);
+    supabase.rpc("mark_medals_seen").then(({ error }) => {
+      if (error) console.error("Could not mark medals as seen:", error);
+    });
+  };
+
+  // Coming back to the app (e.g. after midnight): check again
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (screenRef.current !== "menu") return;
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) checkMedals(data.user.id);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   // Load the profile summary every time the menu is shown
   // (so it updates right after you finish a game)
@@ -152,7 +215,7 @@ function Home() {
         if (!user || !active) return;
         setUserId(user.id);
 
-        const [profileRes, bestRes, masteredRes] = await Promise.all([
+        const [profileRes, bestRes, masteredRes, streakRes] = await Promise.all([
           supabase
             .from("profiles")
             .select("username")
@@ -169,6 +232,7 @@ function Home() {
             .select("word_id")
             .eq("user_id", user.id)
             .eq("mastered", true),
+          supabase.rpc("my_streak"),
         ]);
 
         if (!active) return;
@@ -178,7 +242,10 @@ function Home() {
             profileRes.data?.username || user.email?.split("@")[0] || "Player",
           bestScore: bestRes.data?.[0]?.score ?? 0,
           mastered: new Set((masteredRes.data || []).map((r) => r.word_id)).size,
+          streak: streakRes.error ? null : streakRes.data?.[0]?.current_streak ?? 0,
+          playedToday: streakRes.error ? false : !!streakRes.data?.[0]?.played_today,
         });
+        checkMedals(user.id);
       } catch (error) {
         console.error("Error loading profile summary:", error);
         if (active) setProfile((p) => ({ ...p, loaded: true }));
@@ -273,9 +340,20 @@ function Home() {
                 <span className="vh-stat-value">
                   {shown(profile.mastered.toLocaleString())}
                 </span>
-                <span className="vh-stat-label">📖 Words mastered</span>
+                <span className="vh-stat-label">📖 Mastered</span>
+              </div>
+              <div className="vh-stat vh-stat--streak">
+                <span className="vh-stat-value">
+                  {profile.loaded && profile.streak !== null ? profile.streak : "–"}
+                </span>
+                <span className="vh-stat-label">🔥 Day streak</span>
               </div>
             </div>
+            {profile.loaded && profile.streak > 0 && !profile.playedToday && (
+              <p className="vh-streak-hint">
+                🔥 Play today to keep your {profile.streak}-day streak alive!
+              </p>
+            )}
 
             <div
               className="vh-progress"
@@ -339,6 +417,9 @@ function Home() {
     <>
       <BackgroundMusic />
       {activeScreen}
+      {newMedals.length > 0 && (
+        <MedalPopup medals={newMedals} onClose={handleCloseMedals} />
+      )}
     </>
   );
 }
