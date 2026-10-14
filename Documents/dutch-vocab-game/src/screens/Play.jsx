@@ -169,6 +169,8 @@ function PlayGame({ goBack, onRestart }) {
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null); // "saving" | "saved" | "error"
   const [saveErrorMsg, setSaveErrorMsg] = useState("");
+  const [wordSaveStatus, setWordSaveStatus] = useState(null); // "saving" | "saved" | "error"
+  const [wordSaveError, setWordSaveError] = useState("");
   const [shownScore, setShownScore] = useState(0);
   const shownRef = useRef(0);
   const targetScore = totalSessionScore + score;
@@ -393,7 +395,62 @@ const fetchWordsForLevel = async (levelNumber) => {
     }
   };
 
-  const handleSubmit = (e) => {
+  // Persist each answer immediately. Session-end saving below only stores the score/summary.
+  const saveWordAttempt = async (wordId, isCorrect) => {
+    setWordSaveStatus("saving");
+    setWordSaveError("");
+
+    try {
+      const { data: userData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("You are not signed in. Please sign in again.");
+
+      const { data: existing, error: fetchError } = await supabase
+        .from("user_progress")
+        .select("id, correct_count, incorrect_count")
+        .eq("user_id", userId)
+        .eq("word_id", wordId)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+
+      if (existing) {
+        const correctCount = Number(existing.correct_count || 0) + (isCorrect ? 1 : 0);
+        const incorrectCount = Number(existing.incorrect_count || 0) + (isCorrect ? 0 : 1);
+        const { error: updateError } = await supabase
+          .from("user_progress")
+          .update({
+            correct_count: correctCount,
+            incorrect_count: incorrectCount,
+            mastered: correctCount >= 10,
+            last_seen_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase.from("user_progress").insert({
+          user_id: userId,
+          word_id: wordId,
+          correct_count: isCorrect ? 1 : 0,
+          incorrect_count: isCorrect ? 0 : 1,
+          mastered: false,
+          last_seen_at: new Date().toISOString(),
+        });
+        if (insertError) throw insertError;
+      }
+
+      setWordSaveStatus("saved");
+      return true;
+    } catch (error) {
+      console.error("Word progress save failed:", error);
+      setWordSaveStatus("error");
+      setWordSaveError(error?.message || "Unknown database error");
+      return false;
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     // A question can be scored only once, including when the answer is blank.
     if (answerLockedRef.current || gameOver || levelCompleted || loading) return;
@@ -500,13 +557,17 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     setAllUsedWordIds(newAllUsedWords);
 
     const newSessionResult = {
-  wordId: currentWord.id,
-  word: currentWord.english,
-  dutch: currentWord.dutch,
-  correct: isCorrect,
-  answer: userAnswer,
-  level: currentLevel,
+      wordId: currentWord.id,
+      word: currentWord.english,
+      dutch: currentWord.dutch,
+      correct: isCorrect,
+      answer: userAnswer,
+      level: currentLevel,
     };
+
+    // Wait for this attempt's progress write before allowing the next question.
+    // Feedback is already shown above; a failure is surfaced in the UI below.
+    await saveWordAttempt(currentWord.id, isCorrect);
 
     setSessionResults([...sessionResults, newSessionResult]);
     setAllSessionResults([...allSessionResults, newSessionResult]);
@@ -688,91 +749,30 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     sessionSavedRef.current = true;
     setSaveStatus("saving");
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user.id;
-      const correctCount = results.filter((r) => r.correct).length;
+      const { data: userData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("You are not signed in. Please sign in again.");
 
+      const correctCount = results.filter((r) => r.correct).length;
       const { error: sessionError } = await supabase.from("sessions").insert([
         {
           user_id: userId,
           score: finalScore,
           correct_answers: correctCount,
           total_words: results.length,
-          ended_at: new Date(),
+          ended_at: new Date().toISOString(),
           level: currentLevel,
         },
       ]);
 
-      if (sessionError) {
-        console.error("Session save error:", sessionError);
-        setSaveStatus("error");
-        setSaveErrorMsg(sessionError.message || "Unknown error");
-        return;
-      }
+      if (sessionError) throw sessionError;
       setSaveStatus("saved");
-
-      const uniqueWords = new Map();
-      for (const result of results) {
-        if (!uniqueWords.has(result.word)) {
-          uniqueWords.set(result.word, []);
-        }
-        uniqueWords.get(result.word).push(result.correct);
-      }
-
-      for (const [wordEnglish, correctArray] of uniqueWords) {
-        const word = words.find((w) => w.english === wordEnglish);
-        if (!word) continue;
-
-        const correctCountWord = correctArray.filter((c) => c).length;
-        const incorrectCount = correctArray.filter((c) => !c).length;
-
-        const { data: existingProgress, error: fetchError } = await supabase
-          .from("user_progress")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("word_id", word.id)
-          .maybeSingle();
-
-        if (fetchError && fetchError.code !== "PGRST116") {
-          console.error("Fetch error:", fetchError);
-          continue;
-        }
-
-        if (existingProgress) {
-          const newCorrectCount =
-            existingProgress.correct_count + correctCountWord;
-          const newIncorrectCount =
-            existingProgress.incorrect_count + incorrectCount;
-          const isMastered = newCorrectCount >= 10;
-
-          await supabase
-            .from("user_progress")
-            .update({
-              correct_count: newCorrectCount,
-              incorrect_count: newIncorrectCount,
-              mastered: isMastered,
-              last_seen_at: new Date(),
-            })
-            .eq("id", existingProgress.id);
-        } else {
-          await supabase.from("user_progress").insert([
-            {
-              user_id: userId,
-              word_id: word.id,
-              correct_count: correctCountWord,
-              incorrect_count: incorrectCount,
-              mastered: false,
-              last_seen_at: new Date(),
-            },
-          ]);
-        }
-      }
-
-      console.log("Session saved automatically!");
+      console.log("Session summary saved. Word progress was saved per answer.");
     } catch (error) {
-      console.error("Error saving session:", error);
+      console.error("Error saving session summary:", error);
       setSaveStatus("error");
-      setSaveErrorMsg(error.message || "Unknown error");
+      setSaveErrorMsg(error?.message || "Unknown error");
     }
   };
 
@@ -1163,6 +1163,18 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       {feedback && !wrongAnswerCard && (
         <p style={{ ...styles.feedback, color: feedback.includes("✅") ? "#10b981" : "#ef4444" }}>
           {feedback}
+        </p>
+      )}
+
+      {wordSaveStatus === "saving" && (
+        <p role="status" style={{ textAlign: "center", color: "#64748b", padding: "0 16px" }}>Saving word progress…</p>
+      )}
+      {wordSaveStatus === "saved" && (
+        <p role="status" style={{ textAlign: "center", color: "#16a34a", padding: "0 16px" }}>Word progress saved.</p>
+      )}
+      {wordSaveStatus === "error" && (
+        <p role="alert" style={{ textAlign: "center", color: "#dc2626", padding: "0 16px" }}>
+          ⚠️ This answer could not be saved to Your Words: {wordSaveError}. Please take a screenshot and check the database before continuing.
         </p>
       )}
 
