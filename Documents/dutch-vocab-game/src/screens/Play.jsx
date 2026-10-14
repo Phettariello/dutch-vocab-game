@@ -500,11 +500,12 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     setAllUsedWordIds(newAllUsedWords);
 
     const newSessionResult = {
-      word: currentWord.english,
-      dutch: currentWord.dutch,
-      correct: isCorrect,
-      answer: userAnswer,
-      level: currentLevel,
+  wordId: currentWord.id,
+  word: currentWord.english,
+  dutch: currentWord.dutch,
+  correct: isCorrect,
+  answer: userAnswer,
+  level: currentLevel,
     };
 
     setSessionResults([...sessionResults, newSessionResult]);
