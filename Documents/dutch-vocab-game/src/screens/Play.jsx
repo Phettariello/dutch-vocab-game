@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
+import { primeKeyboard, releaseKeyboardPrimer } from "../keyboardPrimer";
 
 const ANIMATIONS = `
 @keyframes floatUp {
@@ -131,6 +132,7 @@ function PlayGame({ goBack, onRestart }) {
   const [answerLocked, setAnswerLocked] = useState(false);
   // Ref blocks rapid repeated submits immediately, before React re-renders.
   const answerLockedRef = useRef(false);
+  const inputRef = useRef(null);
   const [feedback, setFeedback] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
   const [reportedWord, setReportedWord] = useState(null);
@@ -322,6 +324,7 @@ const fetchWordsForLevel = async (levelNumber) => {
         setQuestionsInLevel(0);
       } catch (error) {
         console.error("Error initializing game:", error);
+        releaseKeyboardPrimer();
         alert("Failed to load words.");
         goBack();
       } finally {
@@ -342,6 +345,17 @@ const fetchWordsForLevel = async (levelNumber) => {
     check();
     return () => vv.removeEventListener("resize", check);
   }, []);
+
+  // Keep the keyboard open: whenever a question is on screen, the cursor goes
+  // straight into the answer bar (no tapping needed).
+  useEffect(() => {
+    if (loading || levelCompleted || gameOver) return;
+    const el = inputRef.current;
+    if (el) {
+      el.focus();
+      releaseKeyboardPrimer();
+    }
+  }, [loading, levelCompleted, gameOver, currentIndex, currentLevel]);
 
   // After the game ends: show the splash for a moment, then the overview
   useEffect(() => {
@@ -415,9 +429,12 @@ const fetchWordsForLevel = async (levelNumber) => {
 
       if (fetchError) throw fetchError;
 
+      let newlyMastered = false;
+
       if (existing) {
         const correctCount = Number(existing.correct_count || 0) + (isCorrect ? 1 : 0);
         const incorrectCount = Number(existing.incorrect_count || 0) + (isCorrect ? 0 : 1);
+        newlyMastered = isCorrect && Number(existing.correct_count || 0) < 10 && correctCount >= 10;
         const { error: updateError } = await supabase
           .from("user_progress")
           .update({
@@ -441,12 +458,12 @@ const fetchWordsForLevel = async (levelNumber) => {
       }
 
       setWordSaveStatus("saved");
-      return true;
+      return { ok: true, newlyMastered };
     } catch (error) {
       console.error("Word progress save failed:", error);
       setWordSaveStatus("error");
       setWordSaveError(error?.message || "Unknown database error");
-      return false;
+      return { ok: false, newlyMastered: false };
     }
   };
 
@@ -567,7 +584,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
     // Wait for this attempt's progress write before allowing the next question.
     // Feedback is already shown above; a failure is surfaced in the UI below.
-    await saveWordAttempt(currentWord.id, isCorrect);
+    const saveResult = await saveWordAttempt(currentWord.id, isCorrect);
 
     setSessionResults([...sessionResults, newSessionResult]);
     setAllSessionResults([...allSessionResults, newSessionResult]);
@@ -608,6 +625,25 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         currentWordId: currentWord.id,
         currentIndex,
       });
+    } else if (saveResult?.newlyMastered) {
+      // The word just reached 10 correct answers: pause and celebrate.
+      // The game continues when the player taps the button.
+      setTimeout(() => {
+        playSound("celebrate");
+        setWrongAnswerCard({
+          kind: "mastered",
+          english: currentWord.english,
+          dutch: currentWord.dutch,
+          transition,
+          newScore,
+          newQuestionsInLevel,
+          newLives,
+          results: [...allSessionResults, newSessionResult],
+          totalSessionScore,
+          currentWordId: currentWord.id,
+          currentIndex,
+        });
+      }, 700);
     } else if (transition === "gameOver") {
       setTimeout(() => {
         const finalPoints = newScore + totalSessionScore;
@@ -642,6 +678,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
   const continueAfterWrongAnswer = () => {
     if (!wrongAnswerCard) return;
     const pending = wrongAnswerCard;
+    // Focus inside the tap, so the keyboard comes straight back on iPhone
+    if (pending.transition === "nextQuestion") inputRef.current?.focus();
     setWrongAnswerCard(null);
     setReportOpen(false);
     setReportStatus("");
@@ -711,6 +749,9 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       return;
     }
 
+    // Open the keyboard during this tap; the answer bar takes over when it appears
+    primeKeyboard();
+
     try {
       setLoading(true);
       const nextLevelWords = await fetchWordsForLevel(nextLevelNumber);
@@ -736,6 +777,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       setLevelCompleted(false);
     } catch (error) {
       console.error("Error loading next level:", error);
+      releaseKeyboardPrimer();
       alert("Failed to load next level.");
       setGameOver(true);
       setLevelCompleted(false);
@@ -1110,8 +1152,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
       </div>
 
-<div style={styles.questionContainer}>
-  <h2 style={styles.questionText}>Translate to Dutch:</h2>
+      <div style={styles.questionContainer}>
+        <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1
           style={{
             ...styles.wordToTranslate,
@@ -1137,10 +1179,20 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
       <form onSubmit={handleSubmit} style={styles.form}>
         <input
+          ref={inputRef}
           type="text"
           value={answer}
-          onChange={(e) => setAnswer(e.target.value)}
+          onChange={(e) => {
+            // While an answer is being processed the bar ignores typing,
+            // but it stays enabled so the keyboard stays open.
+            if (!answerLockedRef.current) setAnswer(e.target.value);
+          }}
           placeholder="Type the translation..."
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="go"
           style={{
             ...styles.input,
             ...(answerState === "correct"
@@ -1149,10 +1201,13 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
               ? styles.inputWrong
               : {}),
           }}
-          disabled={gameOver || answerLocked || levelCompleted || loading}
-          autoFocus
         />
-        <button type="submit" style={styles.submitButton} disabled={gameOver || answerLocked || levelCompleted || loading}>
+        <button
+          type="submit"
+          style={styles.submitButton}
+          disabled={gameOver || answerLocked || levelCompleted || loading}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           Submit
         </button>
       </form>
@@ -1166,9 +1221,6 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       {wordSaveStatus === "saving" && (
         <p role="status" style={{ textAlign: "center", color: "#64748b", padding: "0 16px" }}>Saving word progress…</p>
       )}
-{wordSaveStatus === "saving" && (
-  <p role="status" style={{ textAlign: "center", color: "#64748b", padding: "0 16px" }}>Saving word progress…</p>
-)}
       {wordSaveStatus === "error" && (
         <p role="alert" style={{ textAlign: "center", color: "#dc2626", padding: "0 16px" }}>
           ⚠️ This answer could not be saved to Your Words: {wordSaveError}. Please take a screenshot and check the database before continuing.
@@ -1199,7 +1251,24 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       {wrongAnswerCard && (
         <div role="dialog" aria-modal="true" aria-labelledby="wrong-answer-title" style={styles.wrongAnswerOverlay}>
           <div style={styles.wrongAnswerCard}>
-            {!reportOpen ? (
+            {wrongAnswerCard.kind === "mastered" ? (
+              <>
+                <Confetti />
+                <div style={styles.masteredIcon}>🏅</div>
+                <p style={styles.masteredEyebrow}>WORD MASTERED</p>
+                <h2 id="wrong-answer-title" style={styles.wrongAnswerTitle}>You know this one!</h2>
+                <p style={styles.wrongAnswerEnglish}>{wrongAnswerCard.english}</p>
+                <div style={styles.correctAnswerBox}>
+                  <span style={styles.correctAnswerLabel}>DUTCH</span>
+                  <strong style={styles.correctAnswerDutch}>{wrongAnswerCard.dutch}</strong>
+                </div>
+                <p style={styles.wrongAnswerNote}>10 correct answers. It now counts as a mastered word.</p>
+                <button type="button" onClick={continueAfterWrongAnswer} style={styles.wrongAnswerContinueButton}>
+                  {wrongAnswerCard.transition === "nextLevel" ? "Continue" : "Keep going"}
+                  <span aria-hidden="true"> →</span>
+                </button>
+              </>
+            ) : !reportOpen ? (
               <>
                 <div style={styles.wrongAnswerIcon}>✕</div>
                 <p style={styles.wrongAnswerEyebrow}>NOT QUITE</p>
@@ -1283,6 +1352,8 @@ const styles = {
     display: "flex",
     flexDirection: "column",
   },
+  masteredIcon: { fontSize: "64px", lineHeight: 1, margin: "0 auto 8px", animation: "splashPop 0.7s ease-out" },
+  masteredEyebrow: { margin: "0 0 5px", color: "#fcd34d", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
   stickyTop: {
     position: "sticky",
     top: 0,
@@ -1468,24 +1539,24 @@ const styles = {
     wordBreak: "break-word",
   },
   exampleBox: {
-  background: "rgba(30, 58, 138, 0.6)",
-  border: "1px solid rgba(6,182,212,0.3)",
-  borderRadius: "10px",
-  padding: "14px 16px",
-  margin: "0 20px 16px",
-},
-exampleNL: {
-  color: "#bfdbfe",
-  margin: "0 0 8px 0",
-  fontSize: "clamp(15px, 4vw, 17px)",
-  lineHeight: 1.45,
-},
-exampleEN: {
-  color: "#cbd5e1",
-  margin: "0",
-  fontSize: "clamp(14px, 3.6vw, 16px)",
-  lineHeight: 1.45,
-},
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "10px",
+    padding: "14px 16px",
+    margin: "0 20px 16px",
+  },
+  exampleNL: {
+    color: "#bfdbfe",
+    margin: "0 0 8px 0",
+    fontSize: "clamp(15px, 4vw, 17px)",
+    lineHeight: 1.45,
+  },
+  exampleEN: {
+    color: "#cbd5e1",
+    margin: "0",
+    fontSize: "clamp(14px, 3.6vw, 16px)",
+    lineHeight: 1.45,
+  },
   form: {
     display: "flex",
     gap: "8px",
