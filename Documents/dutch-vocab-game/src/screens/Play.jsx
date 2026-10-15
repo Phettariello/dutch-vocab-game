@@ -1110,11 +1110,8 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
       </div>
 
-      <div style={styles.questionContainer}>
-        <p style={styles.questionLabel}>
-          Q{questionsInLevel + 1}/{QUESTIONS_PER_LEVEL}
-        </p>
-        <h2 style={styles.questionText}>Translate to Dutch:</h2>
+<div style={styles.questionContainer}>
+  <h2 style={styles.questionText}>Translate to Dutch:</h2>
         <h1
           style={{
             ...styles.wordToTranslate,
@@ -1169,9 +1166,9 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       {wordSaveStatus === "saving" && (
         <p role="status" style={{ textAlign: "center", color: "#64748b", padding: "0 16px" }}>Saving word progress…</p>
       )}
-      {wordSaveStatus === "saved" && (
-        <p role="status" style={{ textAlign: "center", color: "#16a34a", padding: "0 16px" }}>Word progress saved.</p>
-      )}
+{wordSaveStatus === "saving" && (
+  <p role="status" style={{ textAlign: "center", color: "#64748b", padding: "0 16px" }}>Saving word progress…</p>
+)}
       {wordSaveStatus === "error" && (
         <p role="alert" style={{ textAlign: "center", color: "#dc2626", padding: "0 16px" }}>
           ⚠️ This answer could not be saved to Your Words: {wordSaveError}. Please take a screenshot and check the database before continuing.
@@ -1471,22 +1468,24 @@ const styles = {
     wordBreak: "break-word",
   },
   exampleBox: {
-    background: "rgba(30, 58, 138, 0.6)",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "8px",
-    padding: "12px",
-    margin: "0 20px 16px",
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-  },
-  exampleNL: {
-    color: "#93c5fd",
-    margin: "0 0 6px 0",
-  },
-  exampleEN: {
-    color: "#cbd5e1",
-    margin: "0",
-    fontSize: "clamp(10px, 2.5vw, 11px)",
-  },
+  background: "rgba(30, 58, 138, 0.6)",
+  border: "1px solid rgba(6,182,212,0.3)",
+  borderRadius: "10px",
+  padding: "14px 16px",
+  margin: "0 20px 16px",
+},
+exampleNL: {
+  color: "#bfdbfe",
+  margin: "0 0 8px 0",
+  fontSize: "clamp(15px, 4vw, 17px)",
+  lineHeight: 1.45,
+},
+exampleEN: {
+  color: "#cbd5e1",
+  margin: "0",
+  fontSize: "clamp(14px, 3.6vw, 16px)",
+  lineHeight: 1.45,
+},
   form: {
     display: "flex",
     gap: "8px",

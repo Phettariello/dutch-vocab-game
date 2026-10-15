@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 
+// "Master" mode. The file is still called Review.jsx so Home.jsx keeps working.
 function Review({ goBack }) {
   const [words, setWords] = useState([]);
   const [reviewWords, setReviewWords] = useState([]);
@@ -24,6 +25,8 @@ function Review({ goBack }) {
   const [reportText, setReportText] = useState("");
   const [reportNotes, setReportNotes] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
+  const [notice, setNotice] = useState(null); // { type, title, message, onClose }
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const inputRef = useRef(null);
 
   // ============================================================================
@@ -88,14 +91,14 @@ function Review({ goBack }) {
 
     setReportLoading(true);
     try {
-      const currentWord = reviewWords[currentIndex];
-      
+      const word = reviewWords[currentIndex];
+
       await supabase.from("word_issues").insert([
         {
-          word_id: currentWord.id,
+          word_id: word.id,
           user_id: userId,
-          english: currentWord.english,
-          dutch: currentWord.dutch,
+          english: word.english,
+          dutch: word.dutch,
           user_answer: answer.trim(),
           suggested_correction: reportText.trim(),
           feedback_text: reportNotes.trim(),
@@ -106,14 +109,28 @@ function Review({ goBack }) {
       setReportText("");
       setReportNotes("");
       setReportOpen(false);
-      
-      alert("✅ Thank you! Your report has been submitted. We'll review it soon!");
+
+      setNotice({
+        type: "success",
+        title: "Report sent",
+        message: "Thanks for helping us improve the word list. We'll look into it soon.",
+      });
     } catch (error) {
       console.error("Error submitting report:", error);
-      alert("❌ Error submitting report. Please try again.");
+      setNotice({
+        type: "error",
+        title: "Couldn't send report",
+        message: "Something went wrong while sending your report. Please try again.",
+      });
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const closeNotice = () => {
+    const callback = notice?.onClose;
+    setNotice(null);
+    if (callback) callback();
   };
 
   // ============================================================================
@@ -127,8 +144,12 @@ function Review({ goBack }) {
         const currentUserId = userData.user?.id;
 
         if (!currentUserId) {
-          alert("You must be logged in to use Review Mode.");
-          goBack();
+          setNotice({
+            type: "info",
+            title: "Please sign in",
+            message: "You need to be signed in to use Master mode.",
+            onClose: goBack,
+          });
           return;
         }
 
@@ -187,6 +208,11 @@ function Review({ goBack }) {
         setWords(wordsWithProgress);
       } catch (error) {
         console.error("Error fetching review words:", error);
+        setNotice({
+          type: "error",
+          title: "Couldn't load your words",
+          message: "Please check your connection and try again.",
+        });
       } finally {
         setLoading(false);
       }
@@ -202,15 +228,11 @@ function Review({ goBack }) {
     let filtered = words;
 
     if (selectedCategories.size > 0) {
-      filtered = filtered.filter((w) =>
-        selectedCategories.has(w.category)
-      );
+      filtered = filtered.filter((w) => selectedCategories.has(w.category));
     }
 
     if (selectedDifficulties.size > 0) {
-      filtered = filtered.filter((w) =>
-        selectedDifficulties.has(w.difficulty)
-      );
+      filtered = filtered.filter((w) => selectedDifficulties.has(w.difficulty));
     }
 
     if (masteredFilter === "nonmastered") {
@@ -240,6 +262,16 @@ function Review({ goBack }) {
     }, 300);
     return () => clearTimeout(timer);
   }, [currentIndex, showAnswer]);
+
+  // iPhone: detect when the keyboard is open so the top area can shrink
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const check = () => setKeyboardOpen(window.innerHeight - vv.height > 150);
+    vv.addEventListener("resize", check);
+    check();
+    return () => vv.removeEventListener("resize", check);
+  }, []);
 
   // ============================================================================
   // FUNCTION: Normalize text
@@ -295,51 +327,41 @@ function Review({ goBack }) {
   };
 
   // ============================================================================
-  // FUNCTION: Navigate to next word
+  // FUNCTION: Navigate to next / previous word
   // ============================================================================
+  const resetCard = () => {
+    setAnswer("");
+    setFeedback("");
+    setShowAnswer(false);
+    setReportOpen(false);
+    setReportText("");
+    setReportNotes("");
+  };
+
   const nextWord = () => {
     if (currentIndex < reviewWords.length - 1) {
       setCurrentIndex(currentIndex + 1);
-      setAnswer("");
-      setFeedback("");
-      setShowAnswer(false);
-      setReportOpen(false);
-      setReportText("");
-      setReportNotes("");
+      resetCard();
     }
   };
 
-  // ============================================================================
-  // FUNCTION: Navigate to previous word
-  // ============================================================================
   const previousWord = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
-      setAnswer("");
-      setFeedback("");
-      setShowAnswer(false);
-      setReportOpen(false);
-      setReportText("");
-      setReportNotes("");
+      resetCard();
     }
   };
 
   // ============================================================================
-  // FUNCTION: Toggle category filter
+  // FILTER HELPERS
   // ============================================================================
   const toggleCategory = (cat) => {
     const newSet = new Set(selectedCategories);
-    if (newSet.has(cat)) {
-      newSet.delete(cat);
-    } else {
-      newSet.add(cat);
-    }
+    if (newSet.has(cat)) newSet.delete(cat);
+    else newSet.add(cat);
     setSelectedCategories(newSet);
   };
 
-  // ============================================================================
-  // FUNCTION: Select All/Deselect All categories
-  // ============================================================================
   const toggleAllCategories = () => {
     if (selectedCategories.size === categories.length) {
       setSelectedCategories(new Set());
@@ -348,22 +370,13 @@ function Review({ goBack }) {
     }
   };
 
-  // ============================================================================
-  // FUNCTION: Toggle difficulty filter
-  // ============================================================================
   const toggleDifficulty = (diff) => {
     const newSet = new Set(selectedDifficulties);
-    if (newSet.has(diff)) {
-      newSet.delete(diff);
-    } else {
-      newSet.add(diff);
-    }
+    if (newSet.has(diff)) newSet.delete(diff);
+    else newSet.add(diff);
     setSelectedDifficulties(newSet);
   };
 
-  // ============================================================================
-  // FUNCTION: Select All/Deselect All difficulties
-  // ============================================================================
   const toggleAllDifficulties = () => {
     if (selectedDifficulties.size === 10) {
       setSelectedDifficulties(new Set());
@@ -372,364 +385,338 @@ function Review({ goBack }) {
     }
   };
 
+  const chip = (active) => ({
+    ...styles.chip,
+    ...(active ? styles.chipActive : {}),
+  });
+
+  const renderFilters = () => (
+    <div style={styles.filtersPanel}>
+      <button onClick={() => setFiltersOpen(!filtersOpen)} style={styles.filterToggle}>
+        <span>🔧 Filters · {reviewWords.length} words</span>
+        <span aria-hidden="true">{filtersOpen ? "▲" : "▼"}</span>
+      </button>
+
+      {filtersOpen && (
+        <div style={styles.filtersContent}>
+          <div style={styles.filterGroup}>
+            <div style={styles.filterHeader}>
+              <h4 style={styles.filterTitle}>Categories</h4>
+              <button onClick={toggleAllCategories} style={styles.selectAllBtn}>
+                {selectedCategories.size === categories.length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div style={styles.chipGrid2}>
+              {categories.map((cat) => (
+                <label key={cat} style={chip(selectedCategories.has(cat))}>
+                  <input
+                    type="checkbox"
+                    checked={selectedCategories.has(cat)}
+                    onChange={() => toggleCategory(cat)}
+                    style={styles.checkbox}
+                  />
+                  {cat}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={styles.filterGroup}>
+            <div style={styles.filterHeader}>
+              <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+              <button onClick={toggleAllDifficulties} style={styles.selectAllBtn}>
+                {selectedDifficulties.size === 10 ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div style={styles.chipGrid5}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                <label
+                  key={level}
+                  style={{ ...chip(selectedDifficulties.has(level)), justifyContent: "center" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedDifficulties.has(level)}
+                    onChange={() => toggleDifficulty(level)}
+                    style={styles.checkbox}
+                  />
+                  {level}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={styles.filterGroup}>
+            <h4 style={styles.filterTitle}>Word status</h4>
+            <div style={styles.segmented}>
+              {[
+                ["both", "All"],
+                ["nonmastered", "Not mastered"],
+                ["mastered", "Mastered"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setMasteredFilter(value)}
+                  style={{
+                    ...styles.segment,
+                    ...(masteredFilter === value ? styles.segmentActive : {}),
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={styles.filterGroup}>
+            <label style={{ ...chip(shuffle), justifyContent: "center" }}>
+              <input
+                type="checkbox"
+                checked={shuffle}
+                onChange={(e) => setShuffle(e.target.checked)}
+                style={styles.checkbox}
+              />
+              🔀 Shuffle order
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const currentWord = reviewWords[currentIndex];
+  const isCorrectAnswer = feedback.includes("✅");
+
+  // ============================================================================
+  // POP-UPS (replace the browser alert boxes)
+  // ============================================================================
+  const noticeTheme = {
+    success: { icon: "✓", color: "#6ee7b7", bg: "rgba(16,185,129,0.15)", border: "#34d399" },
+    error: { icon: "✕", color: "#fca5a5", bg: "rgba(248,113,113,0.15)", border: "#f87171" },
+    info: { icon: "i", color: "#93c5fd", bg: "rgba(59,130,246,0.15)", border: "#60a5fa" },
+  };
+
+  const popups = (
+    <>
+      {notice && (
+        <div role="dialog" aria-modal="true" aria-labelledby="master-notice-title" style={styles.overlay}>
+          <div style={styles.modalCard}>
+            <div
+              style={{
+                ...styles.modalIcon,
+                color: noticeTheme[notice.type].color,
+                background: noticeTheme[notice.type].bg,
+                borderColor: noticeTheme[notice.type].border,
+              }}
+            >
+              {noticeTheme[notice.type].icon}
+            </div>
+            <h2 id="master-notice-title" style={styles.modalTitle}>{notice.title}</h2>
+            <p style={styles.modalText}>{notice.message}</p>
+            <button type="button" onClick={closeNotice} style={styles.modalPrimaryButton}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {reportOpen && showAnswer && currentWord && !notice && (
+        <div role="dialog" aria-modal="true" aria-labelledby="master-report-title" style={styles.overlay}>
+          <div style={styles.modalCard}>
+            <h2 id="master-report-title" style={styles.reportTitle}>Report a word issue</h2>
+            <p style={styles.reportWord}>
+              <strong>{currentWord.english}</strong> → {currentWord.dutch}
+            </p>
+
+            <label style={styles.formLabel} htmlFor="master-report-correction">
+              What should the correct translation be?
+            </label>
+            <input
+              id="master-report-correction"
+              type="text"
+              value={reportText}
+              onChange={(e) => setReportText(e.target.value)}
+              placeholder="Type the correct translation..."
+              style={styles.reportInput}
+            />
+
+            <label style={{ ...styles.formLabel, marginTop: 12 }} htmlFor="master-report-notes">
+              Extra notes (optional)
+            </label>
+            <textarea
+              id="master-report-notes"
+              value={reportNotes}
+              onChange={(e) => setReportNotes(e.target.value)}
+              placeholder="Add any extra context..."
+              maxLength={1000}
+              rows={3}
+              style={styles.reportTextarea}
+            />
+
+            <div style={styles.reportActions}>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportOpen(false);
+                  setReportText("");
+                  setReportNotes("");
+                }}
+                style={styles.reportCancelButton}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitErrorReport}
+                disabled={reportLoading || !reportText.trim()}
+                style={{
+                  ...styles.reportSubmitButton,
+                  opacity: reportLoading || !reportText.trim() ? 0.6 : 1,
+                  cursor: reportLoading || !reportText.trim() ? "not-allowed" : "pointer",
+                }}
+              >
+                {reportLoading ? "Sending..." : "Send report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   // ============================================================================
   // LOADING STATE
   // ============================================================================
   if (loading) {
     return (
-      <div style={styles.loadingContainer}>
-        <h1 style={styles.loadingText}>Loading Review Words...</h1>
-      </div>
+      <>
+        <div style={styles.loadingContainer}>
+          <h1 style={styles.loadingText}>Loading your words...</h1>
+        </div>
+        {popups}
+      </>
     );
   }
 
   // ============================================================================
-  // EMPTY STATE
+  // EMPTY STATE (no progress yet)
   // ============================================================================
   if (words.length === 0) {
     return (
-      <div style={styles.loadingContainer}>
-        <h1 style={styles.loadingText}>🎉 No words to review!</h1>
-        <p style={styles.loadingSubtext}>All your words are mastered. Great job!</p>
-        <button onClick={goBack} style={styles.secondaryButton}>
-          Back to Menu
-        </button>
-      </div>
+      <>
+        <div style={styles.loadingContainer}>
+          <div style={{ fontSize: 64 }}>🎯</div>
+          <h1 style={{ ...styles.loadingText, textAlign: "center", marginTop: 8 }}>
+            Nothing to master yet
+          </h1>
+          <p style={styles.loadingSubtext}>
+            Play or Practice a few words first. They will show up here.
+          </p>
+          <button onClick={goBack} style={styles.primaryButton}>
+            ← Menu
+          </button>
+        </div>
+        {popups}
+      </>
     );
   }
+
+  // ============================================================================
+  // HEADER (shared by the next two states)
+  // ============================================================================
+  const header = (
+    <div style={styles.header}>
+      <h1 style={styles.title}>🎯 Master</h1>
+      <button
+        onClick={goBack}
+        style={styles.backButton}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#0891b2";
+          e.currentTarget.style.transform = "scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#06b6d4";
+          e.currentTarget.style.transform = "scale(1)";
+        }}
+      >
+        {keyboardOpen ? "←" : "← Menu"}
+      </button>
+    </div>
+  );
 
   // ============================================================================
   // NO WORDS AFTER FILTERS
   // ============================================================================
   if (reviewWords.length === 0) {
     return (
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>📚 Review</h1>
-          <button
-            onClick={goBack}
-            style={styles.backButton}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#0891b2";
-              e.currentTarget.style.transform = "scale(1.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#06b6d4";
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            ← Menu
-          </button>
+      <>
+        <div style={styles.container}>
+          <div style={styles.stickyTop}>{header}</div>
+          <div style={{ height: 12 }} />
+          {renderFilters()}
+          <div style={styles.emptyMessage}>
+            <div style={{ fontSize: 48 }}>🔍</div>
+            <p style={styles.emptyTitle}>No words match these filters</p>
+            <p style={styles.emptyText}>Open the filters above and select more categories or levels.</p>
+          </div>
         </div>
-
-        <div style={styles.filtersPanel}>
-          <button
-            onClick={() => setFiltersOpen(!filtersOpen)}
-            style={styles.filterToggle}
-          >
-            🔧 Filters {filtersOpen ? "▼" : "▶"}
-          </button>
-
-          {filtersOpen && (
-            <div style={styles.filtersContent}>
-              <div style={styles.filterGroup}>
-                <div style={styles.filterHeader}>
-                  <h4 style={styles.filterTitle}>Categories</h4>
-                  <button
-                    onClick={toggleAllCategories}
-                    style={styles.selectAllBtn}
-                  >
-                    {selectedCategories.size === categories.length
-                      ? "Deselect All"
-                      : "Select All"}
-                  </button>
-                </div>
-                <div style={styles.checkboxGroup}>
-                  {categories.map((cat) => (
-                    <label key={cat} style={styles.checkboxLabel}>
-                      <input
-                        type="checkbox"
-                        checked={selectedCategories.has(cat)}
-                        onChange={() => toggleCategory(cat)}
-                        style={styles.checkbox}
-                      />
-                      {cat}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div style={styles.filterGroup}>
-                <div style={styles.filterHeader}>
-                  <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
-                  <button
-                    onClick={toggleAllDifficulties}
-                    style={styles.selectAllBtn}
-                  >
-                    {selectedDifficulties.size === 10 ? "Deselect All" : "Select All"}
-                  </button>
-                </div>
-                <div style={styles.difficultyGrid}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-                    <label key={level} style={styles.checkboxLabelSmall}>
-                      <input
-                        type="checkbox"
-                        checked={selectedDifficulties.has(level)}
-                        onChange={() => toggleDifficulty(level)}
-                        style={styles.checkbox}
-                      />
-                      {level}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div style={styles.filterGroup}>
-                <h4 style={styles.filterTitle}>Word Status</h4>
-                <div style={styles.checkboxGroup}>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="radio"
-                      name="mastered"
-                      checked={masteredFilter === "nonmastered"}
-                      onChange={() => setMasteredFilter("nonmastered")}
-                      style={styles.checkbox}
-                    />
-                    Non-mastered only
-                  </label>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="radio"
-                      name="mastered"
-                      checked={masteredFilter === "mastered"}
-                      onChange={() => setMasteredFilter("mastered")}
-                      style={styles.checkbox}
-                    />
-                    Mastered only
-                  </label>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="radio"
-                      name="mastered"
-                      checked={masteredFilter === "both"}
-                      onChange={() => setMasteredFilter("both")}
-                      style={styles.checkbox}
-                    />
-                    Both
-                  </label>
-                </div>
-              </div>
-
-              <div style={styles.filterGroup}>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={shuffle}
-                    onChange={(e) => setShuffle(e.target.checked)}
-                    style={styles.checkbox}
-                  />
-                  🔀 Shuffle order
-                </label>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div style={styles.emptyMessage}>
-          <p style={styles.emptyMessageText}>No words to review with current filters.</p>
-          <p style={styles.emptyMessageText}>Try adjusting your settings above.</p>
-        </div>
-
-        <button onClick={goBack} style={styles.secondaryButton}>
-          Back to Menu
-        </button>
-      </div>
+        {popups}
+      </>
     );
   }
-
-  const currentWord = reviewWords[currentIndex];
 
   // ============================================================================
   // MAIN RENDER
   // ============================================================================
+  const isLast = currentIndex >= reviewWords.length - 1;
+
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>📚 Review</h1>
-        <button
-          onClick={goBack}
-          style={styles.backButton}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#0891b2";
-            e.currentTarget.style.transform = "scale(1.05)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#06b6d4";
-            e.currentTarget.style.transform = "scale(1)";
-          }}
-        >
-          ← Menu
-        </button>
-      </div>
+    <>
+      <div style={styles.container}>
+        <div style={styles.stickyTop}>
+          {header}
 
-      <div style={styles.progressBar}>
-        <div
-          style={{
-            ...styles.progressFill,
-            width: `${((currentIndex + 1) / reviewWords.length) * 100}%`,
-          }}
-        />
-      </div>
-
-      <div style={styles.statsGrid}>
-        <div style={styles.statItem}>
-          📊 {currentIndex + 1}/{reviewWords.length}
-        </div>
-        <div style={styles.statItem}>
-          📈 {currentWord.masteryPercent}%
-        </div>
-        <div style={styles.statItem}>
-          ✅ {currentWord.correct_count}
-        </div>
-        <div style={styles.statItem}>
-          ❌ {currentWord.incorrect_count}
-        </div>
-      </div>
-
-      <div style={styles.masteryBarContainer}>
-        <div style={styles.masteryBar}>
-          <div
-            style={{
-              width: `${currentWord.masteryPercent}%`,
-              height: "100%",
-              background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
-              transition: "width 0.3s ease",
-              borderRadius: "4px",
-            }}
-          />
-        </div>
-      </div>
-
-      <div style={styles.filtersPanel}>
-        <button
-          onClick={() => setFiltersOpen(!filtersOpen)}
-          style={styles.filterToggle}
-        >
-          🔧 Filters {filtersOpen ? "▼" : "▶"}
-        </button>
-
-        {filtersOpen && (
-          <div style={styles.filtersContent}>
-            <div style={styles.filterGroup}>
-              <div style={styles.filterHeader}>
-                <h4 style={styles.filterTitle}>Categories</h4>
-                <button
-                  onClick={toggleAllCategories}
-                  style={styles.selectAllBtn}
-                >
-                  {selectedCategories.size === categories.length
-                    ? "Deselect All"
-                    : "Select All"}
-                </button>
-              </div>
-              <div style={styles.checkboxGroup}>
-                {categories.map((cat) => (
-                  <label key={cat} style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={selectedCategories.has(cat)}
-                      onChange={() => toggleCategory(cat)}
-                      style={styles.checkbox}
-                    />
-                    {cat}
-                  </label>
-                ))}
-              </div>
+          <div style={keyboardOpen ? styles.hudCompact : styles.hud}>
+            <div style={styles.scoreWrap}>
+              <span style={keyboardOpen ? styles.scoreCompact : styles.scoreBig}>
+                {currentWord.masteryPercent}%
+              </span>
+              <span style={styles.scoreLabel}>mastery</span>
             </div>
-
-            <div style={styles.filterGroup}>
-              <div style={styles.filterHeader}>
-                <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
-                <button
-                  onClick={toggleAllDifficulties}
-                  style={styles.selectAllBtn}
-                >
-                  {selectedDifficulties.size === 10 ? "Deselect All" : "Select All"}
-                </button>
-              </div>
-              <div style={styles.difficultyGrid}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-                  <label key={level} style={styles.checkboxLabelSmall}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDifficulties.has(level)}
-                      onChange={() => toggleDifficulty(level)}
-                      style={styles.checkbox}
-                    />
-                    {level}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div style={styles.filterGroup}>
-              <h4 style={styles.filterTitle}>Word Status</h4>
-              <div style={styles.checkboxGroup}>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="radio"
-                    name="mastered"
-                    checked={masteredFilter === "nonmastered"}
-                    onChange={() => setMasteredFilter("nonmastered")}
-                    style={styles.checkbox}
-                  />
-                  Non-mastered only
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="radio"
-                    name="mastered"
-                    checked={masteredFilter === "mastered"}
-                    onChange={() => setMasteredFilter("mastered")}
-                    style={styles.checkbox}
-                  />
-                  Mastered only
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="radio"
-                    name="mastered"
-                    checked={masteredFilter === "both"}
-                    onChange={() => setMasteredFilter("both")}
-                    style={styles.checkbox}
-                  />
-                  Both
-                </label>
-              </div>
-            </div>
-
-            <div style={styles.filterGroup}>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={shuffle}
-                  onChange={(e) => setShuffle(e.target.checked)}
-                  style={styles.checkbox}
-                />
-                🔀 Shuffle order
-              </label>
+            <div style={styles.chipRow}>
+              <span style={styles.pillGreen}>✅ {currentWord.correct_count}</span>
+              <span style={styles.pillRed}>❌ {currentWord.incorrect_count}</span>
+              {currentWord.mastered && <span style={styles.pillGold}>🏅 Mastered</span>}
             </div>
           </div>
-        )}
-      </div>
 
-      <div style={styles.scrollableContent}>
+          <div style={styles.progressBar}>
+            <div
+              style={{
+                ...styles.progressFill,
+                width: `${((currentIndex + 1) / reviewWords.length) * 100}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div style={{ height: 12 }} />
+        {renderFilters()}
+
         <div style={styles.questionContainer}>
           <p style={styles.questionLabel}>
             Question {currentIndex + 1}/{reviewWords.length}
           </p>
           <h2 style={styles.questionText}>Translate to Dutch:</h2>
-          <h1 style={styles.wordToTranslate}>{currentWord.english}</h1>
+          <h1
+            style={{
+              ...styles.wordToTranslate,
+              ...(keyboardOpen ? { fontSize: "28px" } : {}),
+            }}
+          >
+            {currentWord.english}
+          </h1>
         </div>
 
         {currentWord.example_nl && (
@@ -752,7 +739,7 @@ function Review({ goBack }) {
               type="text"
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
-              placeholder="Enter the translation..."
+              placeholder="Type the translation..."
               style={styles.input}
             />
             <button type="submit" style={styles.submitButton}>
@@ -760,94 +747,55 @@ function Review({ goBack }) {
             </button>
           </form>
         ) : (
-          <div>
-            {feedback && (
-              <p
+          <div style={styles.resultWrap}>
+            <div style={isCorrectAnswer ? styles.resultCardCorrect : styles.resultCardWrong}>
+              <div
                 style={{
-                  ...styles.feedback,
-                  color: feedback.includes("✅") ? "#10b981" : "#ef4444",
+                  ...styles.resultIcon,
+                  ...(isCorrectAnswer ? styles.resultIconCorrect : styles.resultIconWrong),
                 }}
               >
-                {feedback}
-              </p>
-            )}
-            <div style={styles.answerDisplay}>
-              <p style={styles.answerLabel}>Correct Answer:</p>
-              <p style={styles.answerText}>{currentWord.dutch}</p>
-            </div>
-
-            {feedback.includes("❌") && !reportOpen && (
-              <button
-                onClick={() => setReportOpen(true)}
-                style={styles.reportButton}
-              >
-                🚨 Report Error
-              </button>
-            )}
-
-            {reportOpen && feedback.includes("❌") && (
-              <div style={styles.reportForm}>
-                <h3 style={styles.reportTitle}>Report Incorrect Translation</h3>
-                
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>What should the correct translation be?</label>
-                  <input
-                    type="text"
-                    value={reportText}
-                    onChange={(e) => setReportText(e.target.value)}
-                    placeholder="Enter correct translation..."
-                    style={styles.reportInput}
-                  />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.formLabel}>Additional notes (optional)</label>
-                  <textarea
-                    value={reportNotes}
-                    onChange={(e) => setReportNotes(e.target.value)}
-                    placeholder="Add any extra context..."
-                    style={styles.reportTextarea}
-                  />
-                </div>
-
-                <div style={styles.reportButtonsGroup}>
-                  <button
-                    onClick={submitErrorReport}
-                    disabled={reportLoading || !reportText.trim()}
-                    style={{
-                      ...styles.submitReportBtn,
-                      opacity: reportLoading || !reportText.trim() ? 0.6 : 1,
-                      cursor: reportLoading || !reportText.trim() ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {reportLoading ? "Submitting..." : "Submit Report"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setReportOpen(false);
-                      setReportText("");
-                      setReportNotes("");
-                    }}
-                    style={styles.cancelReportBtn}
-                  >
-                    Cancel
-                  </button>
-                </div>
+                {isCorrectAnswer ? "✓" : "✕"}
               </div>
-            )}
+              <h2 style={styles.resultTitle}>
+                {isCorrectAnswer ? "Correct!" : "Not quite"}
+              </h2>
+
+              <div style={styles.correctAnswerBox}>
+                <span style={styles.correctAnswerLabel}>Correct answer</span>
+                <strong style={styles.correctAnswerDutch}>{currentWord.dutch}</strong>
+              </div>
+
+              {!isCorrectAnswer && (
+                <p style={styles.resultNote}>
+                  {answer.trim() ? (
+                    <>
+                      Your answer: <strong>{answer.trim()}</strong>
+                    </>
+                  ) : (
+                    "No answer entered"
+                  )}
+                </p>
+              )}
+            </div>
 
             <button
               onClick={nextWord}
+              disabled={isLast}
               style={{
-                ...styles.primaryButton,
-                opacity: currentIndex < reviewWords.length - 1 ? 1 : 0.5,
-                cursor:
-                  currentIndex < reviewWords.length - 1 ? "pointer" : "not-allowed",
+                ...styles.nextButton,
+                opacity: isLast ? 0.5 : 1,
+                cursor: isLast ? "not-allowed" : "pointer",
               }}
-              disabled={currentIndex >= reviewWords.length - 1}
             >
-              Next Word →
+              {isLast ? "Last word reached" : "Next word →"}
             </button>
+
+            {!isCorrectAnswer && (
+              <button onClick={() => setReportOpen(true)} style={styles.reportLinkButton}>
+                ⚑ Report issue with this word
+              </button>
+            )}
           </div>
         )}
 
@@ -864,63 +812,60 @@ function Review({ goBack }) {
             ← Previous
           </button>
           <button onClick={goBack} style={styles.secondaryButton}>
-            Back to Menu
+            ← Menu
           </button>
         </div>
+
+        <div style={{ height: 24 }} />
       </div>
-    </div>
+      {popups}
+    </>
   );
 }
 
+const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
 const styles = {
+  // ---------- Layout (same shell as Play) ----------
   container: {
-    minHeight: "100vh",
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "var(--vv-height, 100%)",
+    transform: "translateY(var(--vv-top, 0px))",
+    overflowY: "auto",
+    overflowX: "hidden",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     padding: "0",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily: FONT,
     display: "flex",
     flexDirection: "column",
   },
-  loadingContainer: {
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "20px",
-  },
-  loadingText: {
-    fontSize: "clamp(20px, 5vw, 28px)",
-    color: "white",
-    margin: "0",
-    fontWeight: "700",
-  },
-  loadingSubtext: {
-    fontSize: "clamp(14px, 3vw, 16px)",
-    color: "#bfdbfe",
-    margin: "12px 0 20px 0",
-  },
-  header: {
+  stickyTop: {
     position: "sticky",
     top: 0,
     zIndex: 100,
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+  },
+  header: {
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "16px 20px",
+    padding: "12px 16px",
     borderBottom: "1px solid rgba(6,182,212,0.2)",
-    gap: "12px",
+    gap: "8px",
   },
   title: {
-    fontSize: "clamp(20px, 5vw, 28px)",
+    fontSize: "clamp(18px, 5vw, 24px)",
     fontWeight: "800",
     margin: "0",
     color: "white",
     textShadow: "0 2px 8px rgba(6,182,212,0.3)",
-    flex: 1,
+    flex: "1 1 auto",
+    whiteSpace: "nowrap",
   },
   backButton: {
     padding: "8px 12px",
@@ -935,61 +880,98 @@ const styles = {
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
+
+  // ---------- Top stats ----------
+  hud: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "12px 16px 10px",
+  },
+  hudCompact: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "6px 16px 6px",
+  },
+  scoreWrap: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: "8px",
+  },
+  scoreBig: {
+    fontSize: "clamp(34px, 10vw, 44px)",
+    fontWeight: "800",
+    color: "#fbbf24",
+    lineHeight: 1,
+    textShadow: "0 2px 12px rgba(251,191,36,0.35)",
+    fontVariantNumeric: "tabular-nums",
+  },
+  scoreCompact: {
+    fontSize: "22px",
+    fontWeight: "800",
+    color: "#fbbf24",
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+  },
+  scoreLabel: {
+    fontSize: "13px",
+    color: "#93c5fd",
+    fontWeight: "600",
+  },
+  chipRow: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  pillGreen: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#86efac",
+    background: "rgba(34,197,94,0.16)",
+    border: "1px solid rgba(34,197,94,0.4)",
+    borderRadius: "999px",
+    padding: "2px 9px",
+    whiteSpace: "nowrap",
+  },
+  pillRed: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#fca5a5",
+    background: "rgba(239,68,68,0.16)",
+    border: "1px solid rgba(239,68,68,0.4)",
+    borderRadius: "999px",
+    padding: "2px 9px",
+    whiteSpace: "nowrap",
+  },
+  pillGold: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#fcd34d",
+    background: "rgba(251,191,36,0.16)",
+    border: "1px solid rgba(251,191,36,0.4)",
+    borderRadius: "999px",
+    padding: "2px 9px",
+    whiteSpace: "nowrap",
+  },
   progressBar: {
     height: "6px",
     background: "rgba(6,182,212,0.2)",
-    borderRadius: "8px",
     overflow: "hidden",
-    margin: "12px 20px 0",
-    maxWidth: "calc(100% - 40px)",
   },
   progressFill: {
     height: "100%",
     background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
     transition: "width 0.3s ease",
   },
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
-    gap: "8px",
-    padding: "12px 16px",
-    maxWidth: "800px",
-    margin: "0 auto",
-    width: "100%",
-    boxSizing: "border-box",
-  },
-  statItem: {
-    padding: "10px 8px",
-    background: "rgba(30, 58, 138, 0.6)",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
-    fontSize: "clamp(10px, 2.2vw, 12px)",
-    color: "#bfdbfe",
-    fontWeight: "500",
-    textAlign: "center",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  masteryBarContainer: {
-    maxWidth: "600px",
-    margin: "0 auto",
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    paddingBottom: "12px",
-    width: "100%",
-    boxSizing: "border-box",
-  },
-  masteryBar: {
-    height: "10px",
-    background: "rgba(6,182,212,0.2)",
-    borderRadius: "5px",
-    overflow: "hidden",
-  },
+
+  // ---------- Filters ----------
   filtersPanel: {
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    paddingBottom: "12px",
+    padding: "0 16px 4px",
     maxWidth: "600px",
     margin: "0 auto",
     width: "100%",
@@ -997,30 +979,33 @@ const styles = {
   },
   filterToggle: {
     width: "100%",
-    padding: "10px 12px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "11px 14px",
     background: "rgba(255,255,255,0.1)",
     border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
-    fontSize: "clamp(12px, 2.5vw, 14px)",
+    borderRadius: "8px",
+    fontSize: "14px",
     fontWeight: "600",
+    fontFamily: "inherit",
     cursor: "pointer",
     color: "#bfdbfe",
-    transition: "all 0.2s ease",
   },
   filtersContent: {
     marginTop: "8px",
     background: "rgba(30, 58, 138, 0.8)",
     border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "8px",
-    padding: "12px",
+    borderRadius: "10px",
+    padding: "14px",
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
+    gap: "16px",
   },
   filterGroup: {
     display: "flex",
     flexDirection: "column",
-    gap: "6px",
+    gap: "8px",
   },
   filterHeader: {
     display: "flex",
@@ -1029,76 +1014,94 @@ const styles = {
     gap: "8px",
   },
   filterTitle: {
-    fontSize: "clamp(11px, 2vw, 12px)",
-    color: "#06b6d4",
+    fontSize: "13px",
+    color: "#67e8f9",
     margin: "0",
-    fontWeight: "600",
-    textTransform: "uppercase",
+    fontWeight: "700",
   },
   selectAllBtn: {
-    padding: "4px 8px",
-    fontSize: "clamp(10px, 2vw, 11px)",
+    padding: "5px 10px",
+    fontSize: "12px",
     background: "#06b6d4",
     color: "#0f172a",
     border: "none",
-    borderRadius: "4px",
+    borderRadius: "6px",
     cursor: "pointer",
     fontWeight: "600",
-    transition: "all 0.2s ease",
     whiteSpace: "nowrap",
   },
-  checkboxGroup: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
+  chipGrid2: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
   },
-  difficultyGrid: {
+  chipGrid5: {
     display: "grid",
     gridTemplateColumns: "repeat(5, 1fr)",
-    gap: "6px",
+    gap: "8px",
   },
-  checkboxLabel: {
+  chip: {
     display: "flex",
     alignItems: "center",
-    gap: "6px",
-    fontSize: "clamp(12px, 2.5vw, 13px)",
+    gap: "8px",
+    padding: "10px",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    background: "rgba(30, 58, 138, 0.4)",
     color: "#bfdbfe",
+    fontSize: "13px",
     cursor: "pointer",
     userSelect: "none",
+    transition: "all 0.2s ease",
   },
-  checkboxLabelSmall: {
-    display: "flex",
-    alignItems: "center",
-    gap: "4px",
-    fontSize: "clamp(11px, 2vw, 12px)",
-    color: "#bfdbfe",
-    cursor: "pointer",
-    userSelect: "none",
+  chipActive: {
+    background: "rgba(6,182,212,0.15)",
+    borderColor: "#06b6d4",
+    color: "white",
   },
   checkbox: {
     width: "14px",
     height: "14px",
     cursor: "pointer",
     accentColor: "#06b6d4",
+    flexShrink: 0,
   },
-  scrollableContent: {
-    flex: 1,
-    overflowY: "auto",
-    paddingBottom: "20px",
+  segmented: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "6px",
   },
+  segment: {
+    padding: "10px 6px",
+    fontSize: "13px",
+    fontWeight: "600",
+    fontFamily: "inherit",
+    color: "#bfdbfe",
+    background: "rgba(30, 58, 138, 0.4)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    cursor: "pointer",
+  },
+  segmentActive: {
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    borderColor: "transparent",
+    color: "white",
+  },
+
+  // ---------- Question ----------
   questionContainer: {
     textAlign: "center",
-    padding: "0 20px",
-    paddingTop: "16px",
+    padding: "16px 20px 0",
     marginBottom: "16px",
   },
   questionLabel: {
-    fontSize: "clamp(11px, 2.5vw, 12px)",
+    fontSize: "13px",
     color: "#93c5fd",
     margin: "0 0 6px 0",
+    fontWeight: "600",
   },
   questionText: {
-    fontSize: "clamp(12px, 2.5vw, 13px)",
+    fontSize: "clamp(13px, 3vw, 14px)",
     color: "#bfdbfe",
     margin: "0 0 8px 0",
     fontWeight: "500",
@@ -1113,35 +1116,47 @@ const styles = {
   exampleBox: {
     background: "rgba(30, 58, 138, 0.6)",
     border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "8px",
-    padding: "12px",
-    margin: "0 20px 16px",
-    fontSize: "clamp(11px, 2.5vw, 12px)",
+    borderRadius: "10px",
+    padding: "14px 16px",
+    margin: "0 16px 16px",
+    maxWidth: "600px",
+    boxSizing: "border-box",
+    alignSelf: "center",
+    width: "calc(100% - 32px)",
   },
   exampleNL: {
-    color: "#93c5fd",
-    margin: "0 0 6px 0",
+    color: "#bfdbfe",
+    margin: "0 0 8px 0",
+    fontSize: "clamp(15px, 4vw, 17px)",
+    lineHeight: 1.45,
   },
   exampleEN: {
     color: "#cbd5e1",
     margin: "0",
-    fontSize: "clamp(10px, 2.5vw, 11px)",
+    fontSize: "clamp(14px, 3.6vw, 16px)",
+    lineHeight: 1.45,
   },
+
+  // ---------- Answer form ----------
   form: {
     display: "flex",
     gap: "8px",
-    padding: "0 20px 12px",
+    padding: "0 16px 12px",
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: "600px",
+    alignSelf: "center",
   },
   input: {
     padding: "10px 12px",
-    fontSize: "clamp(13px, 3vw, 14px)",
+    fontSize: "16px",
     border: "1px solid rgba(6,182,212,0.4)",
     borderRadius: "6px",
     flex: 1,
-    minWidth: "120px",
+    minWidth: 0,
+    boxSizing: "border-box",
     background: "rgba(255,255,255,0.95)",
     color: "#0f172a",
-    transition: "all 0.2s ease",
     fontFamily: "inherit",
   },
   submitButton: {
@@ -1153,170 +1168,318 @@ const styles = {
     border: "none",
     borderRadius: "6px",
     cursor: "pointer",
-    transition: "all 0.2s ease",
     boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
-  feedback: {
-    fontSize: "clamp(13px, 3vw, 14px)",
-    fontWeight: "600",
-    margin: "12px 20px 0",
-    minHeight: "24px",
+
+  // ---------- Result card ----------
+  resultWrap: {
+    width: "100%",
+    maxWidth: "600px",
+    alignSelf: "center",
+    boxSizing: "border-box",
+    padding: "0 16px",
+  },
+  resultCardCorrect: {
+    padding: "20px 18px",
+    borderRadius: "20px",
     textAlign: "center",
+    color: "#f8fafc",
+    background: "linear-gradient(160deg, #134e4a 0%, #172554 100%)",
+    border: "1px solid rgba(52,211,153,0.5)",
+    boxShadow: "0 12px 36px rgba(0,0,0,0.3)",
   },
-  answerDisplay: {
-    background: "rgba(30, 58, 138, 0.6)",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "8px",
-    padding: "16px",
-    margin: "12px 20px",
+  resultCardWrong: {
+    padding: "20px 18px",
+    borderRadius: "20px",
+    textAlign: "center",
+    color: "#f8fafc",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)",
+    border: "1px solid rgba(248,113,113,0.5)",
+    boxShadow: "0 12px 36px rgba(0,0,0,0.3)",
   },
-  answerLabel: {
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-    color: "#93c5fd",
-    margin: "0 0 6px 0",
-    fontWeight: "500",
+  resultIcon: {
+    width: "44px",
+    height: "44px",
+    margin: "0 auto 8px",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "22px",
+    fontWeight: 900,
+    border: "2px solid",
   },
-  answerText: {
-    fontSize: "clamp(18px, 4vw, 22px)",
-    fontWeight: "700",
-    color: "white",
-    margin: "0",
+  resultIconCorrect: {
+    background: "rgba(16,185,129,0.15)",
+    borderColor: "#34d399",
+    color: "#6ee7b7",
   },
-  reportButton: {
-    padding: "10px 16px",
-    fontSize: "clamp(12px, 2.5vw, 13px)",
-    fontWeight: "600",
-    background: "rgba(239, 68, 68, 0.2)",
+  resultIconWrong: {
+    background: "rgba(248,113,113,0.15)",
+    borderColor: "#f87171",
     color: "#fca5a5",
-    border: "1px solid rgba(239, 68, 68, 0.4)",
-    borderRadius: "6px",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    display: "block",
-    margin: "12px auto",
   },
-  reportForm: {
-    background: "rgba(30, 58, 138, 0.8)",
-    border: "2px solid rgba(239, 68, 68, 0.4)",
-    borderRadius: "8px",
-    padding: "16px",
-    margin: "12px 20px",
+  resultTitle: {
+    margin: "0 0 14px",
+    fontSize: "22px",
+    lineHeight: 1.2,
+    fontWeight: 850,
   },
-  reportTitle: {
-    fontSize: "clamp(13px, 2.5vw, 14px)",
-    color: "#fca5a5",
-    margin: "0 0 12px 0",
-    fontWeight: "600",
-  },
-  formGroup: {
-    marginBottom: "12px",
+  correctAnswerBox: {
     display: "flex",
     flexDirection: "column",
     gap: "6px",
+    padding: "16px 14px",
+    borderRadius: "16px",
+    background: "rgba(16,185,129,0.12)",
+    border: "1px solid rgba(52,211,153,0.55)",
   },
-  formLabel: {
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-    color: "#bfdbfe",
-    fontWeight: "500",
+  correctAnswerLabel: {
+    color: "#6ee7b7",
+    fontSize: "12px",
+    fontWeight: 800,
   },
-  reportInput: {
-    padding: "10px 12px",
-    fontSize: "clamp(12px, 2.5vw, 13px)",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
-    background: "rgba(255,255,255,0.95)",
-    color: "#0f172a",
+  correctAnswerDutch: {
+    color: "#ecfdf5",
+    fontSize: "clamp(24px, 7vw, 32px)",
+    overflowWrap: "anywhere",
+    lineHeight: 1.2,
+  },
+  resultNote: {
+    margin: "14px 0 0",
+    color: "#cbd5e1",
+    fontSize: "14px",
+    lineHeight: 1.5,
+    overflowWrap: "anywhere",
+  },
+  nextButton: {
+    width: "100%",
+    marginTop: "14px",
+    border: 0,
+    borderRadius: "14px",
+    padding: "15px 18px",
+    color: "#052e2b",
+    background: "linear-gradient(135deg, #6ee7b7, #34d399)",
+    fontSize: "16px",
+    fontWeight: 850,
     fontFamily: "inherit",
-  },
-  reportTextarea: {
-    padding: "10px 12px",
-    fontSize: "clamp(12px, 2.5vw, 13px)",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
-    background: "rgba(255,255,255,0.95)",
-    color: "#0f172a",
-    fontFamily: "inherit",
-    minHeight: "80px",
-    resize: "vertical",
-  },
-  reportButtonsGroup: {
-    display: "flex",
-    gap: "8px",
-    marginTop: "12px",
-  },
-  submitReportBtn: {
-    flex: 1,
-    padding: "10px 12px",
-    fontSize: "clamp(11px, 2.5vw, 12px)",
-    fontWeight: "600",
-    background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
-    color: "white",
-    border: "none",
-    borderRadius: "6px",
     cursor: "pointer",
-    transition: "all 0.2s ease",
+    boxShadow: "0 8px 22px rgba(16,185,129,0.2)",
   },
-  cancelReportBtn: {
-    flex: 1,
+  reportLinkButton: {
+    display: "block",
+    margin: "12px auto 0",
     padding: "10px 12px",
-    fontSize: "clamp(11px, 2.5vw, 12px)",
+    border: "1px solid rgba(148,163,184,0.35)",
+    borderRadius: "10px",
+    color: "#cbd5e1",
+    background: "transparent",
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  navigationButtons: {
+    display: "flex",
+    gap: "10px",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    padding: "18px 16px 0",
+  },
+  secondaryButton: {
+    padding: "12px 20px",
+    fontSize: "clamp(12px, 2.5vw, 13px)",
     fontWeight: "600",
     background: "rgba(255,255,255,0.1)",
-    color: "#bfdbfe",
+    color: "#06b6d4",
     border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
+    borderRadius: "8px",
     cursor: "pointer",
-    transition: "all 0.2s ease",
+    fontFamily: "inherit",
+    flex: "1 1 140px",
+    maxWidth: "200px",
   },
   primaryButton: {
-    padding: "12px 20px",
+    padding: "12px 24px",
     fontSize: "clamp(13px, 2.5vw, 14px)",
     fontWeight: "600",
     background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
     color: "white",
     border: "none",
-    borderRadius: "6px",
+    borderRadius: "8px",
     cursor: "pointer",
-    boxShadow: "0 2px 6px rgba(59, 130, 246, 0.2)",
-    transition: "all 0.2s ease",
-    display: "block",
-    margin: "16px auto",
-    maxWidth: "300px",
-    width: "calc(100% - 32px)",
+    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.3)",
+    fontFamily: "inherit",
   },
-  secondaryButton: {
-    padding: "10px 16px",
-    fontSize: "clamp(12px, 2.5vw, 13px)",
-    background: "rgba(255,255,255,0.1)",
-    color: "#06b6d4",
-    border: "1px solid rgba(6,182,212,0.3)",
-    borderRadius: "6px",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    fontWeight: "500",
-  },
-  navigationButtons: {
+
+  // ---------- Empty / loading ----------
+  loadingContainer: {
+    minHeight: "100vh",
     display: "flex",
-    gap: "8px",
+    flexDirection: "column",
+    alignItems: "center",
     justifyContent: "center",
-    flexWrap: "wrap",
-    padding: "8px 16px",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    fontFamily: FONT,
+    padding: "20px",
+  },
+  loadingText: {
+    fontSize: "clamp(20px, 5vw, 28px)",
+    color: "white",
+    margin: "0",
+    fontWeight: "700",
+  },
+  loadingSubtext: {
+    fontSize: "clamp(14px, 3vw, 16px)",
+    color: "#bfdbfe",
+    margin: "12px 0 24px 0",
+    textAlign: "center",
+    maxWidth: "320px",
+    lineHeight: 1.5,
   },
   emptyMessage: {
     textAlign: "center",
     padding: "40px 20px",
-    flex: 1,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
   },
-  emptyMessageText: {
+  emptyTitle: {
+    color: "white",
+    fontSize: "18px",
+    fontWeight: "700",
+    margin: "8px 0 6px",
+  },
+  emptyText: {
     color: "#bfdbfe",
-    fontSize: "clamp(13px, 2.5vw, 14px)",
-    margin: "6px 0",
+    fontSize: "14px",
+    margin: "0",
+    lineHeight: 1.5,
+  },
+
+  // ---------- Pop-ups (same look as the Play wrong-answer card) ----------
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 1000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom))",
+    background: "rgba(2, 6, 23, 0.82)",
+    backdropFilter: "blur(8px)",
+    overflowY: "auto",
+    fontFamily: FONT,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: "420px",
+    maxHeight: "100%",
+    overflowY: "auto",
+    boxSizing: "border-box",
+    padding: "26px 22px 22px",
+    borderRadius: "26px",
+    color: "#f8fafc",
+    textAlign: "left",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)",
+    border: "1px solid rgba(148,163,184,0.35)",
+    boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+  },
+  modalIcon: {
+    width: "48px",
+    height: "48px",
+    margin: "0 auto 12px",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "2px solid",
+    fontSize: "24px",
+    fontWeight: 900,
+  },
+  modalTitle: {
+    margin: "0 0 8px",
+    fontSize: "22px",
+    lineHeight: 1.2,
+    fontWeight: 850,
+    textAlign: "center",
+  },
+  modalText: {
+    margin: "0 0 20px",
+    color: "#cbd5e1",
+    fontSize: "15px",
+    lineHeight: 1.5,
+    textAlign: "center",
+  },
+  modalPrimaryButton: {
+    width: "100%",
+    border: 0,
+    borderRadius: "14px",
+    padding: "15px 18px",
+    color: "#052e2b",
+    background: "linear-gradient(135deg, #6ee7b7, #34d399)",
+    fontSize: "16px",
+    fontWeight: 850,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    boxShadow: "0 8px 22px rgba(16,185,129,0.2)",
+  },
+  reportTitle: { margin: "0 0 8px", fontSize: "20px", fontWeight: 850 },
+  reportWord: { margin: "0 0 14px", color: "#bfdbfe", fontSize: "15px" },
+  formLabel: {
+    display: "block",
+    marginBottom: "6px",
+    fontSize: "13px",
+    color: "#bfdbfe",
+    fontWeight: "600",
+  },
+  reportInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "10px 12px",
+    fontSize: "16px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "7px",
+    background: "#ffffff",
+    color: "#111827",
+    fontFamily: "inherit",
+    colorScheme: "light",
+  },
+  reportTextarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "10px",
+    minHeight: "88px",
+    borderRadius: "7px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    font: "inherit",
+    fontSize: "16px",
+    resize: "vertical",
+    color: "#111827",
+    caretColor: "#111827",
+    colorScheme: "light",
+  },
+  reportActions: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" },
+  reportCancelButton: {
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "1px solid #64748b",
+    color: "white",
+    background: "transparent",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  reportSubmitButton: {
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "none",
+    color: "white",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    fontWeight: "700",
+    fontFamily: "inherit",
   },
 };
 
