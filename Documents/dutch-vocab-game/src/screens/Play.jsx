@@ -39,6 +39,19 @@ const ANIMATIONS = `
   0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
   100% { transform: translateY(110vh) rotate(720deg); opacity: 0.9; }
 }
+@keyframes cardPop {
+  0%   { opacity: 0; transform: scale(0.7) translateY(10px); }
+  60%  { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes timerShrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+@keyframes sparkle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  50%      { transform: rotate(12deg) scale(1.15); }
+}
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
@@ -79,6 +92,78 @@ function playCelebration(ctx, volume) {
   tone(1568.0, 1.05, 1.0);
   tone(2093.0, 1.05, 0.6, "square", 0.12);
 }
+
+// ---------------------------------------------------------------------------
+// Extra sound effects. Each note: [frequency, start, duration, waveform, level]
+// ---------------------------------------------------------------------------
+const SOUNDS = {
+  newword: [
+    [880, 0, 0.12, "sine", 0.9],
+    [1108.7, 0.1, 0.12, "sine", 0.9],
+    [1318.5, 0.2, 0.12, "sine", 0.9],
+    [1760, 0.3, 0.4, "sine", 1],
+    [2217.5, 0.4, 0.5, "sine", 0.3],
+    [2637, 0.5, 0.5, "sine", 0.2],
+  ],
+  streak: [
+    [659.25, 0, 0.1],
+    [783.99, 0.08, 0.1],
+    [987.77, 0.16, 0.1],
+    [1318.5, 0.24, 0.3],
+  ],
+  lifegain: [
+    [783.99, 0, 0.12, "sine"],
+    [1046.5, 0.1, 0.12, "sine"],
+    [1568, 0.2, 0.35, "sine"],
+  ],
+  gameover: [
+    [392, 0, 0.3],
+    [349.23, 0.28, 0.3],
+    [329.63, 0.56, 0.3],
+    [261.63, 0.84, 0.8],
+  ],
+  pop: [
+    [520, 0, 0.07, "sine", 0.8],
+    [780, 0.05, 0.09, "sine", 0.6],
+  ],
+};
+
+function playTones(ctx, volume, notes) {
+  const master = ctx.createGain();
+  master.gain.value = (volume / 100) * 0.5;
+  master.connect(ctx.destination);
+  notes.forEach(([freq, start, duration, type = "triangle", level = 1]) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t0 = ctx.currentTime + start;
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(level, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.05);
+  });
+}
+
+// Small vibration (Android only; iPhone Safari ignores it). Follows the sound setting.
+const buzz = (pattern) => {
+  try {
+    if (localStorage.getItem("soundEnabled") !== "false") navigator.vibrate?.(pattern);
+  } catch (e) {}
+};
+
+const CORRECT_CARD_MS = 1400; // how long the "correct" pop-up stays (tap to skip)
+const NEW_WORD_AUTOCLOSE_MS = 0; // 0 = wait for a tap; e.g. 2500 = close by itself
+
+const pickPraise = (streak) => {
+  if (streak >= 5) return "Unstoppable! 🔥";
+  if (streak >= 3) return "On fire! 🔥";
+  const list = ["Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!"];
+  return list[Math.floor(Math.random() * list.length)];
+};
 
 function Confetti() {
   const pieces = useMemo(
@@ -177,6 +262,33 @@ function PlayGame({ goBack, onRestart }) {
   const shownRef = useRef(0);
   const targetScore = totalSessionScore + score;
 
+  // "Correct answer" pop-up
+  const [correctCard, setCorrectCard] = useState(null);
+  const pendingNextRef = useRef(null);
+  const correctTimerRef = useRef(null);
+
+  // "New word" pop-up + list of new words found in this game
+  const [newWordCard, setNewWordCard] = useState(null);
+  const [newWords, setNewWords] = useState([]);
+  const [knownReady, setKnownReady] = useState(false);
+  const knownWordIdsRef = useRef(new Set());
+  const celebratedRef = useRef(new Set());
+
+  // Audio settings popover in the header (same localStorage keys as Settings)
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [sfxOn, setSfxOn] = useState(() => localStorage.getItem("soundEnabled") !== "false");
+  const [sfxVol, setSfxVol] = useState(() => {
+    const v = parseFloat(localStorage.getItem("volume"));
+    return Number.isNaN(v) ? 70 : v;
+  });
+  const [musicOn, setMusicOn] = useState(() => localStorage.getItem("backgroundMusicEnabled") !== "false");
+  const [musicVol, setMusicVol] = useState(() => {
+    const v = Number(localStorage.getItem("backgroundMusicVolume"));
+    return Number.isNaN(v) || localStorage.getItem("backgroundMusicVolume") === null ? 20 : v;
+  });
+
+  useEffect(() => () => clearTimeout(correctTimerRef.current), []);
+
   // Score counts up smoothly instead of jumping
   useEffect(() => {
     const from = shownRef.current;
@@ -212,9 +324,17 @@ function PlayGame({ goBack, onRestart }) {
 
   const playSound = (type) => {
     const soundEnabled = localStorage.getItem("soundEnabled") !== "false";
-    const volume = parseFloat(localStorage.getItem("volume")) || 70;
+    const storedVolume = parseFloat(localStorage.getItem("volume"));
+    const volume = Number.isNaN(storedVolume) ? 70 : storedVolume;
 
-    if (!soundEnabled) return;
+    if (!soundEnabled || volume <= 0) return;
+
+    if (SOUNDS[type]) {
+      try {
+        playTones(getAudioCtx(), volume, SOUNDS[type]);
+      } catch (e) {}
+      return;
+    }
 
     if (type === "celebrate") {
       try {
@@ -318,6 +438,30 @@ const fetchWordsForLevel = async (levelNumber) => {
     const initializeGame = async () => {
       setLoading(true);
       try {
+        // Which words does the player already have in "Your Words"? (for new-word detection)
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          const uid = userData?.user?.id;
+          if (uid) {
+            const known = new Set();
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await supabase
+                .from("user_progress")
+                .select("word_id")
+                .eq("user_id", uid)
+                .order("id")
+                .range(from, from + 999);
+              if (error) throw error;
+              (data || []).forEach((r) => known.add(r.word_id));
+              if (!data || data.length < 1000) break;
+            }
+            knownWordIdsRef.current = known;
+            setKnownReady(true);
+          }
+        } catch (e) {
+          console.warn("Could not load known words; new-word pop-ups disabled:", e);
+        }
+
         const firstLevelWords = await fetchWordsForLevel(1);
         setWords(firstLevelWords);
         setCurrentLevel(1);
@@ -363,6 +507,31 @@ const fetchWordsForLevel = async (levelNumber) => {
     const t = setTimeout(() => setSummaryVisible(true), 2500);
     return () => clearTimeout(t);
   }, [gameOver, summaryVisible]);
+
+  // New word detection: a word with no row in user_progress has never been seen
+  useEffect(() => {
+    if (loading || gameOver || levelCompleted || !knownReady) return;
+    const w = words[currentIndex];
+    if (!w || celebratedRef.current.has(w.id) || knownWordIdsRef.current.has(w.id)) return;
+    celebratedRef.current.add(w.id);
+    setNewWords((list) => [...list, { id: w.id, english: w.english, dutch: w.dutch }]);
+    setNewWordCard({ english: w.english });
+    playSound("newword");
+    buzz([40, 50, 90]);
+  }, [loading, gameOver, levelCompleted, knownReady, currentIndex, words]);
+
+  // Optional auto-close for the new-word pop-up
+  useEffect(() => {
+    if (!newWordCard || !NEW_WORD_AUTOCLOSE_MS) return;
+    const t = setTimeout(() => setNewWordCard(null), NEW_WORD_AUTOCLOSE_MS);
+    return () => clearTimeout(t);
+  }, [newWordCard]);
+
+  // Sound when the game ends
+  useEffect(() => {
+    if (!gameOver) return;
+    playSound(lives <= 0 ? "gameover" : "celebrate");
+  }, [gameOver]);
 
   if (loading) {
     return (
@@ -410,7 +579,7 @@ const fetchWordsForLevel = async (levelNumber) => {
   };
 
   // Persist each answer immediately. Session-end saving below only stores the score/summary.
-  const saveWordAttempt = async (wordId, isCorrect) => {
+  const saveWordAttempt = async (wordId, isCorrect, details = {}) => {
     setWordSaveStatus("saving");
     setWordSaveError("");
 
@@ -457,6 +626,25 @@ const fetchWordsForLevel = async (levelNumber) => {
         if (insertError) throw insertError;
       }
 
+      knownWordIdsRef.current.add(wordId);
+
+      // Keep a history of wrong answers (best effort: never blocks the game)
+      if (!isCorrect) {
+        supabase
+          .from("word_mistakes")
+          .insert({
+            user_id: userId,
+            word_id: wordId,
+            user_answer: details.userAnswer || "",
+            correct_answer: details.correctAnswer || "",
+            level: details.level ?? null,
+            mode: "play",
+          })
+          .then(({ error: mistakeError }) => {
+            if (mistakeError) console.warn("Could not log mistake:", mistakeError.message);
+          });
+      }
+
       setWordSaveStatus("saved");
       return { ok: true, newlyMastered };
     } catch (error) {
@@ -470,7 +658,7 @@ const fetchWordsForLevel = async (levelNumber) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     // A question can be scored only once, including when the answer is blank.
-    if (answerLockedRef.current || gameOver || levelCompleted || loading) return;
+    if (answerLockedRef.current || gameOver || levelCompleted || loading || newWordCard) return;
     answerLockedRef.current = true;
     setAnswerLocked(true);
     const userAnswer = answer.toLowerCase().trim();
@@ -535,17 +723,16 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
       streakBonusThisRound = newStreak;
       newScore += streakBonusThisRound;
 
-      setFeedback(
-        `✅ Correct! +${wordPoints} pts${
-          streakBonusThisRound > 0 ? ` +${streakBonusThisRound} streak` : ""
-        }`
-      );
+      buzz(30);
 
-      if (newStreak % 3 === 0) {
+      if (newStreak % 5 === 0) {
+        setTimeout(() => playSound("streak"), 350);
+      } else if (newStreak % 3 === 0) {
         setTimeout(() => playSound("bonus"), 200);
       }
     } else {
       playSound("wrong");
+      buzz([80, 40, 120]);
       newLives -= 1;
       newStreak = 0;
       setFeedback(`❌ Wrong! The answer is '${currentWord.dutch}'.`);
@@ -584,7 +771,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 
     // Wait for this attempt's progress write before allowing the next question.
     // Feedback is already shown above; a failure is surfaced in the UI below.
-    const saveResult = await saveWordAttempt(currentWord.id, isCorrect);
+    const saveResult = await saveWordAttempt(currentWord.id, isCorrect, {
+      userAnswer: answer.trim(),
+      correctAnswer: currentWord.dutch,
+      level: currentLevel,
+    });
 
     setSessionResults([...sessionResults, newSessionResult]);
     setAllSessionResults([...allSessionResults, newSessionResult]);
@@ -651,28 +842,100 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         saveSessionAuto(finalPoints, [...allSessionResults, newSessionResult]);
         setGameOver(true);
       }, 2000);
-    } else if (transition === "nextLevel") {
-      setTimeout(() => {
-        nextLevel(newScore, newQuestionsInLevel, newLives);
-      }, 2000);
     } else {
-      setTimeout(() => {
-        const nextIndex = currentIndex + 1;
-        if (nextIndex < words.length) {
-          if (words[nextIndex].id === currentWord.id) {
-            let findIndex = nextIndex + 1;
-            while (findIndex < words.length && words[findIndex].id === currentWord.id) findIndex++;
-            setCurrentIndex(findIndex < words.length ? findIndex : nextIndex);
-          } else {
-            setCurrentIndex(nextIndex);
-          }
-        }
-        setFeedback("");
-        setLastAnswerWrong(false);
-        answerLockedRef.current = false;
-        setAnswerLocked(false);
-      }, 2000);
+      const next =
+        transition === "nextLevel"
+          ? () => nextLevel(newScore, newQuestionsInLevel, newLives)
+          : () => moveToNextQuestion(currentIndex, currentWord.id);
+      showCorrectCard(
+        {
+          praise: pickPraise(newStreak),
+          english: currentWord.english,
+          dutch: currentWord.dutch,
+          points: wordPoints,
+          streakBonus: streakBonusThisRound,
+          streak: newStreak,
+        },
+        next
+      );
     }
+  };
+
+  // Go to the next question (skips a repeat of the same word)
+  const moveToNextQuestion = (fromIndex, wordId) => {
+    const nextIndex = fromIndex + 1;
+    if (nextIndex < words.length) {
+      if (words[nextIndex].id === wordId) {
+        let findIndex = nextIndex + 1;
+        while (findIndex < words.length && words[findIndex].id === wordId) findIndex++;
+        setCurrentIndex(findIndex < words.length ? findIndex : nextIndex);
+      } else {
+        setCurrentIndex(nextIndex);
+      }
+    }
+    setFeedback("");
+    setLastAnswerWrong(false);
+    answerLockedRef.current = false;
+    setAnswerLocked(false);
+  };
+
+  // "Correct" pop-up: closes by itself, or immediately when tapped
+  const finishCorrectCard = () => {
+    clearTimeout(correctTimerRef.current);
+    const next = pendingNextRef.current;
+    pendingNextRef.current = null;
+    if (!next) return;
+    setCorrectCard(null);
+    inputRef.current?.focus(); // inside the tap, so the iPhone keyboard stays open
+    next();
+  };
+
+  const showCorrectCard = (card, next) => {
+    setCorrectCard(card);
+    pendingNextRef.current = next;
+    clearTimeout(correctTimerRef.current);
+    correctTimerRef.current = setTimeout(finishCorrectCard, CORRECT_CARD_MS);
+  };
+
+  const closeNewWordCard = () => {
+    playSound("pop");
+    setNewWordCard(null);
+    inputRef.current?.focus();
+  };
+
+  // ---------- Header audio controls ----------
+  const closeAudio = () => {
+    setAudioOpen(false);
+    inputRef.current?.focus();
+  };
+  const changeSfxOn = (on) => {
+    setSfxOn(on);
+    localStorage.setItem("soundEnabled", String(on));
+    if (on) setTimeout(() => playSound("pop"), 30);
+  };
+  const changeSfxVol = (v) => {
+    setSfxVol(v);
+    localStorage.setItem("volume", String(v));
+  };
+  const applyMusic = (enabled, vol) => {
+    localStorage.setItem("backgroundMusicEnabled", String(enabled));
+    localStorage.setItem("backgroundMusicVolume", String(vol));
+    window.dispatchEvent(new CustomEvent("background-music-setting-changed"));
+    document.querySelectorAll("audio").forEach((audio) => {
+      const source = audio.currentSrc || audio.src || "";
+      if (source.includes("background-music")) {
+        audio.volume = vol / 100;
+        if (enabled && audio.paused) audio.play().catch(() => {});
+      }
+    });
+  };
+  const changeMusicOn = (on) => {
+    setMusicOn(on);
+    applyMusic(on, musicVol);
+  };
+  const changeMusicVol = (v) => {
+    setMusicVol(v);
+    applyMusic(musicOn, v);
   };
 
   const continueAfterWrongAnswer = () => {
@@ -737,6 +1000,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     if (gained) setLives(Math.min(5, livesNow + 1));
 
     playSound("celebrate");
+    if (gained) setTimeout(() => playSound("lifegain"), 1300);
     setLevelCompleted(true);
   };
 
@@ -983,6 +1247,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
             {lost ? "GAME OVER" : "YOU WON!"}
           </h1>
           <p style={styles.splashScore}>{finalScore.toLocaleString()} pts</p>
+          {newWords.length > 0 && (
+            <p style={{ ...styles.splashScore, fontSize: "16px", color: "#fcd34d", marginTop: "10px" }}>
+              ✨ {newWords.length} new {newWords.length === 1 ? "word" : "words"} discovered
+            </p>
+          )}
           <p style={styles.splashHint}>Tap to continue</p>
         </div>
       );
@@ -1016,6 +1285,10 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
             </p>
             <p style={styles.statLabel}>Correct</p>
           </div>
+          <div style={{ ...styles.statCard, gridColumn: "1 / -1" }}>
+            <p style={styles.statValue}>✨ {newWords.length}</p>
+            <p style={styles.statLabel}>New words discovered</p>
+          </div>
         </div>
 
         {saveStatus && (
@@ -1036,6 +1309,27 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
               ? `⚠️ Score could not be saved: ${saveErrorMsg}`
               : "Saving score…"}
           </p>
+        )}
+
+        {newWords.length > 0 && (
+          <div style={{ ...styles.missedWordsSection, border: "1px solid rgba(251,191,36,0.35)" }}>
+            <h2 style={{ ...styles.missedWordsTitle, color: "#fcd34d" }}>✨ New Words</h2>
+            <div style={styles.missedWordsTable}>
+              {newWords.slice(0, 12).map((item) => (
+                <div key={item.id} style={styles.missedWordRow}>
+                  <div style={styles.missedWordLeft}>
+                    <span style={styles.missedWordEnglish}>{item.english}</span>
+                    <span style={styles.missedWordDutch}>{item.dutch}</span>
+                  </div>
+                </div>
+              ))}
+              {newWords.length > 12 && (
+                <p style={{ ...styles.missedWordDutch, textAlign: "center", margin: 0 }}>
+                  + {newWords.length - 12} more in Your Words
+                </p>
+              )}
+            </div>
+          </div>
         )}
 
         {missedWords.length > 0 && (
@@ -1094,6 +1388,15 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         <div style={styles.headerRight}>
           <div style={styles.livesContainer}>{renderHearts()}</div>
           <button
+            type="button"
+            onClick={() => setAudioOpen((v) => !v)}
+            style={styles.audioButton}
+            aria-label="Sound settings"
+            aria-expanded={audioOpen}
+          >
+            {sfxOn || musicOn ? "🔊" : "🔇"}
+          </button>
+          <button
             onClick={handleExit}
             style={styles.backButton}
             onMouseEnter={(e) => {
@@ -1108,6 +1411,74 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
             {keyboardOpen ? "←" : "← Menu"}
           </button>
         </div>
+
+        {audioOpen && (
+          <>
+            <div style={styles.audioBackdrop} onClick={closeAudio} />
+            <div style={styles.audioPopover} role="dialog" aria-label="Sound settings">
+              <div style={styles.audioRow}>
+                <span style={styles.audioLabel}>🔊 Sound effects</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={sfxOn}
+                  aria-label="Sound effects"
+                  onClick={() => changeSfxOn(!sfxOn)}
+                  style={styles.audioToggle(sfxOn)}
+                >
+                  <span style={styles.audioKnob(sfxOn)} />
+                </button>
+              </div>
+              <div style={styles.audioSliderRow}>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={sfxVol}
+                  disabled={!sfxOn}
+                  aria-label="Sound effects volume"
+                  onChange={(e) => changeSfxVol(Number(e.target.value))}
+                  onPointerUp={() => playSound("pop")}
+                  style={styles.audioRange}
+                />
+                <strong style={styles.audioValue}>{sfxVol}%</strong>
+              </div>
+
+              <div style={{ ...styles.audioRow, marginTop: 10 }}>
+                <span style={styles.audioLabel}>🎵 Music</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={musicOn}
+                  aria-label="Background music"
+                  onClick={() => changeMusicOn(!musicOn)}
+                  style={styles.audioToggle(musicOn)}
+                >
+                  <span style={styles.audioKnob(musicOn)} />
+                </button>
+              </div>
+              <div style={styles.audioSliderRow}>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={musicVol}
+                  disabled={!musicOn}
+                  aria-label="Music volume"
+                  onChange={(e) => changeMusicVol(Number(e.target.value))}
+                  style={styles.audioRange}
+                />
+                <strong style={styles.audioValue}>{musicVol}%</strong>
+              </div>
+
+              <button type="button" onClick={closeAudio} style={styles.audioDone}>
+                Done
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div style={keyboardOpen ? styles.hudCompact : styles.hud}>
@@ -1185,7 +1556,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           onChange={(e) => {
             // While an answer is being processed the bar ignores typing,
             // but it stays enabled so the keyboard stays open.
-            if (!answerLockedRef.current) setAnswer(e.target.value);
+            if (!answerLockedRef.current && !newWordCard) setAnswer(e.target.value);
           }}
           placeholder="Type the translation..."
           autoComplete="off"
@@ -1205,7 +1576,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         <button
           type="submit"
           style={styles.submitButton}
-          disabled={gameOver || answerLocked || levelCompleted || loading}
+          disabled={gameOver || answerLocked || levelCompleted || loading || !!newWordCard}
           onMouseDown={(e) => e.preventDefault()}
         >
           Submit
@@ -1246,6 +1617,57 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           </div>
           {reportStatus && <p style={styles.reportStatus} role="status">{reportStatus}</p>}
         </form>
+      )}
+
+      {correctCard && !wrongAnswerCard && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={styles.correctOverlay}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={finishCorrectCard}
+        >
+          <div style={styles.correctCard}>
+            <div style={styles.correctBadge}>✓</div>
+            <h2 style={styles.correctTitle}>{correctCard.praise}</h2>
+            <p style={styles.correctWords}>
+              {correctCard.english} → <strong>{correctCard.dutch}</strong>
+            </p>
+            <div style={styles.correctChips}>
+              <span style={styles.chipPoints}>+{correctCard.points} pts</span>
+              {correctCard.streakBonus > 0 && (
+                <span style={styles.chipStreak}>🔥 streak +{correctCard.streakBonus}</span>
+              )}
+            </div>
+            <div style={styles.correctTimerTrack}>
+              <div style={{ ...styles.correctTimerFill, animationDuration: `${CORRECT_CARD_MS}ms` }} />
+            </div>
+            <p style={styles.correctHint}>Tap to continue</p>
+          </div>
+        </div>
+      )}
+
+      {newWordCard && !wrongAnswerCard && (
+        <div role="dialog" aria-modal="true" aria-labelledby="new-word-title" style={styles.wrongAnswerOverlay}>
+          <Confetti />
+          <div style={styles.wrongAnswerCard}>
+            <div style={{ ...styles.masteredIcon, animation: "splashPop 0.7s ease-out" }}>
+              <span style={{ display: "inline-block", animation: "sparkle 1.6s ease-in-out infinite" }}>✨</span>
+            </div>
+            <p style={styles.newWordEyebrow}>NEW WORD DISCOVERED</p>
+            <h2 id="new-word-title" style={styles.wrongAnswerTitle}>You haven't met this one yet</h2>
+            <div style={styles.newWordBox}>
+              <span style={styles.newWordLabel}>ENGLISH</span>
+              <strong style={styles.newWordEnglish}>{newWordCard.english}</strong>
+            </div>
+            <p style={styles.wrongAnswerNote}>
+              Take your best guess. It joins Your Words as soon as you answer.
+            </p>
+            <button type="button" onClick={closeNewWordCard} style={styles.wrongAnswerContinueButton}>
+              Let's try it<span aria-hidden="true"> →</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {wrongAnswerCard && (
@@ -1312,6 +1734,67 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 }
 
 const styles = {
+  // ---------- New word pop-up ----------
+  newWordEyebrow: { margin: "0 0 5px", color: "#fcd34d", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
+  newWordBox: { display: "flex", flexDirection: "column", gap: "7px", padding: "17px 14px", borderRadius: "16px", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.55)" },
+  newWordLabel: { color: "#fcd34d", fontSize: "11px", fontWeight: 900, letterSpacing: "1.5px" },
+  newWordEnglish: { color: "#fffbeb", fontSize: "clamp(24px, 7vw, 32px)", overflowWrap: "anywhere", lineHeight: 1.2 },
+
+  // ---------- Correct answer pop-up ----------
+  correctOverlay: {
+    position: "fixed", inset: 0, zIndex: 900, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "18px", background: "rgba(2, 6, 23, 0.55)", cursor: "pointer",
+  },
+  correctCard: {
+    width: "100%", maxWidth: "320px", boxSizing: "border-box", padding: "22px 20px 16px", borderRadius: "24px",
+    textAlign: "center", color: "#f8fafc", background: "linear-gradient(160deg, #134e4a 0%, #172554 100%)",
+    border: "1px solid rgba(52,211,153,0.6)", boxShadow: "0 20px 60px rgba(0,0,0,0.45), 0 0 30px rgba(52,211,153,0.2)",
+    animation: "cardPop 0.35s ease-out",
+  },
+  correctBadge: {
+    width: "46px", height: "46px", margin: "0 auto 8px", borderRadius: "50%", display: "flex", alignItems: "center",
+    justifyContent: "center", background: "rgba(16,185,129,0.18)", border: "2px solid #34d399", color: "#6ee7b7",
+    fontSize: "24px", fontWeight: 900,
+  },
+  correctTitle: { margin: "0 0 6px", fontSize: "24px", fontWeight: 850, lineHeight: 1.2 },
+  correctWords: { margin: "0 0 12px", color: "#cbd5e1", fontSize: "15px", overflowWrap: "anywhere" },
+  correctChips: { display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", marginBottom: "14px" },
+  chipPoints: { fontSize: "14px", fontWeight: 800, color: "#fbbf24", background: "rgba(251,191,36,0.16)", border: "1px solid rgba(251,191,36,0.4)", borderRadius: "999px", padding: "3px 11px" },
+  chipStreak: { fontSize: "14px", fontWeight: 800, color: "#fdba74", background: "rgba(249,115,22,0.18)", border: "1px solid rgba(249,115,22,0.4)", borderRadius: "999px", padding: "3px 11px" },
+  correctTimerTrack: { height: "4px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", overflow: "hidden" },
+  correctTimerFill: { height: "100%", background: "linear-gradient(90deg, #34d399, #06b6d4)", transformOrigin: "left center", animationName: "timerShrink", animationTimingFunction: "linear", animationFillMode: "forwards" },
+  correctHint: { margin: "8px 0 0", fontSize: "11px", color: "#94a3b8" },
+
+  // ---------- Header audio controls ----------
+  audioButton: {
+    padding: "6px 9px", fontSize: "16px", lineHeight: 1, background: "rgba(255,255,255,0.1)", color: "white",
+    border: "1px solid rgba(6,182,212,0.4)", borderRadius: "6px", cursor: "pointer", flexShrink: 0,
+  },
+  audioBackdrop: { position: "fixed", inset: 0, zIndex: 1, background: "transparent" },
+  audioPopover: {
+    position: "absolute", top: "calc(100% + 6px)", right: "12px", zIndex: 2, width: "min(300px, calc(100vw - 24px))",
+    boxSizing: "border-box", padding: "14px", borderRadius: "14px", color: "#f8fafc",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)", border: "1px solid rgba(148,163,184,0.35)",
+    boxShadow: "0 18px 50px rgba(0,0,0,0.5)",
+  },
+  audioRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" },
+  audioLabel: { fontSize: "14px", fontWeight: 700, color: "#e2e8f0" },
+  audioToggle: (on) => ({
+    position: "relative", width: "46px", height: "26px", borderRadius: "13px", border: "none", cursor: "pointer",
+    background: on ? "#06b6d4" : "#64748b", transition: "background 0.2s ease", flexShrink: 0, padding: 0,
+  }),
+  audioKnob: (on) => ({
+    position: "absolute", top: "3px", left: on ? "23px" : "3px", width: "20px", height: "20px", borderRadius: "50%",
+    background: "white", transition: "left 0.2s ease",
+  }),
+  audioSliderRow: { display: "flex", alignItems: "center", gap: "10px", marginTop: "6px" },
+  audioRange: { flex: 1, minWidth: 0, height: "32px", accentColor: "#06b6d4", touchAction: "pan-y", cursor: "pointer" },
+  audioValue: { width: "42px", textAlign: "right", fontSize: "13px", color: "#fff", fontVariantNumeric: "tabular-nums" },
+  audioDone: {
+    width: "100%", marginTop: "12px", padding: "10px", borderRadius: "10px", border: "none", cursor: "pointer",
+    fontWeight: 700, fontFamily: "inherit", color: "#0f172a", background: "#06b6d4",
+  },
+
   wrongAnswerOverlay: {
     position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
     padding: "max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom))",
@@ -1445,6 +1928,7 @@ const styles = {
     animation: "inputShake 0.4s ease-in-out",
   },
   header: {
+    position: "relative",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexWrap: "wrap",
