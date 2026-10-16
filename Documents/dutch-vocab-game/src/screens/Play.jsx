@@ -166,11 +166,12 @@ const CORRECT_CARD_MS = 1400; // how long the "correct" pop-up stays (tap to ski
 const NEW_WORD_AUTOCLOSE_MS = 0; // 0 = wait for a tap; e.g. 2500 = close by itself
 
 // "Words discovered" milestones (total words in Your Words)
-const MILESTONES = [50, 100, 250, 500, 750, 1000];
+const MILESTONES = [50, 100, 150,250, 500, 750, 1000];
 const isMilestone = (n) => MILESTONES.includes(n) || (n > 1000 && n % 250 === 0);
 const MILESTONE_TEXT = {
   50: "Your Dutch vocabulary is taking off!",
   100: "Triple digits! You are building something real.",
+  150: "150 words! Keep going!",
   250: "A quarter of a thousand. Impressive!",
   500: "500 words! You could hold a real conversation now.",
   750: "750 words. You are on a roll!",
@@ -181,7 +182,7 @@ const milestoneIcon = (n) => (n >= 1000 ? "👑" : n >= 500 ? "🏆" : n >= 250 
 
 const PRAISE = [
   "Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!",
-  "You're the best! 🏅", "Who is the best? You are! 🙌", "Who is the strongest? YOU-ARE-THE-STRONGEST! 💪",
+  "You're the best! 🏅", "Who is the best? You are! 🙌", "Who is the strongest? /nYOU-ARE-THE-STRONGEST! 💪",
   "Look at you go!", "Genius move! 🧠", "Boom! Nailed it!", "You make it look easy!",
   "Dutch master in the making!", "Absolutely crushing it!", "That's how it's done!",
   "Smooth! 😎", "Top class!", "Wow, impressive!", "Gold star for you! ⭐", "Flawless!",
@@ -193,7 +194,7 @@ const PRAISE_HOT = [
 ];
 const PRAISE_BLAZING = [
   "Unstoppable! 🔥", "You're on a roll! 🚀", "Legendary streak! 👑",
-  "Is anyone better? Nope! 🏆", "Who is the strongest? YOU-ARE-THE-STRONGEST! 💪🔥", "Absolute machine! 🤖",
+  "Is anyone better? Nope! 🏆", "Who is the strongest? /nYOU-ARE-THE-STRONGEST! 💪🔥", "Absolute machine! 🤖",
 ];
 let lastPraise = "";
 const pickPraise = (streak) => {
