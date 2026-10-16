@@ -122,6 +122,13 @@ const SOUNDS = {
     [329.63, 0.56, 0.3],
     [261.63, 0.84, 0.8],
   ],
+  milestone: [
+    [523.25, 0, 0.14], [659.25, 0.12, 0.14], [783.99, 0.24, 0.14],
+    [1046.5, 0.36, 0.14], [1318.5, 0.48, 0.14], [1568, 0.6, 0.2],
+    [523.25, 0.85, 1.3], [659.25, 0.85, 1.3], [783.99, 0.85, 1.3],
+    [1046.5, 0.85, 1.3], [1568, 0.85, 1.3, "sine", 0.6],
+    [2093, 0.95, 0.4, "sine", 0.3], [2637, 1.1, 0.4, "sine", 0.25], [3136, 1.25, 0.5, "sine", 0.2],
+  ],
   pop: [
     [520, 0, 0.07, "sine", 0.8],
     [780, 0.05, 0.09, "sine", 0.6],
@@ -158,11 +165,43 @@ const buzz = (pattern) => {
 const CORRECT_CARD_MS = 1400; // how long the "correct" pop-up stays (tap to skip)
 const NEW_WORD_AUTOCLOSE_MS = 0; // 0 = wait for a tap; e.g. 2500 = close by itself
 
+// "Words discovered" milestones (total words in Your Words)
+const MILESTONES = [50, 100, 250, 500, 750, 1000];
+const isMilestone = (n) => MILESTONES.includes(n) || (n > 1000 && n % 250 === 0);
+const MILESTONE_TEXT = {
+  50: "Your Dutch vocabulary is taking off!",
+  100: "Triple digits! You are building something real.",
+  250: "A quarter of a thousand. Impressive!",
+  500: "500 words! You could hold a real conversation now.",
+  750: "750 words. You are on a roll!",
+  1000: "ONE THOUSAND words. Legendary!",
+};
+const milestoneText = (n) => MILESTONE_TEXT[n] || "Another big step on your Dutch journey!";
+const milestoneIcon = (n) => (n >= 1000 ? "👑" : n >= 500 ? "🏆" : n >= 250 ? "🌟" : "🎉");
+
+const PRAISE = [
+  "Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!",
+  "You're the best! 🏅", "Who is the best? You are! 🙌", "Who is the strongest? You! 💪",
+  "Look at you go!", "Genius move! 🧠", "Boom! Nailed it!", "You make it look easy!",
+  "Dutch master in the making!", "Absolutely crushing it!", "That's how it's done!",
+  "Smooth! 😎", "Top class!", "Wow, impressive!", "Gold star for you! ⭐", "Flawless!",
+  "You've got this! 💥", "Tulip-level talent! 🌷", "Hoera! 🎉",
+];
+const PRAISE_HOT = [
+  "On fire! 🔥", "You're heating up! 🔥", "Hot streak! 🔥",
+  "Can't stop, won't stop!", "Who's unstoppable? You! 🔥",
+];
+const PRAISE_BLAZING = [
+  "Unstoppable! 🔥", "You're on a roll! 🚀", "Legendary streak! 👑",
+  "Is anyone better? Nope! 🏆", "Who is the strongest? YOU! 💪🔥", "Absolute machine! 🤖",
+];
+let lastPraise = "";
 const pickPraise = (streak) => {
-  if (streak >= 5) return "Unstoppable! 🔥";
-  if (streak >= 3) return "On fire! 🔥";
-  const list = ["Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!"];
-  return list[Math.floor(Math.random() * list.length)];
+  const list = streak >= 5 ? PRAISE_BLAZING : streak >= 3 ? PRAISE_HOT : PRAISE;
+  let choice = list[Math.floor(Math.random() * list.length)];
+  if (choice === lastPraise) choice = list[(list.indexOf(choice) + 1) % list.length];
+  lastPraise = choice;
+  return choice;
 };
 
 function Confetti() {
@@ -273,6 +312,12 @@ function PlayGame({ goBack, onRestart }) {
   const [knownReady, setKnownReady] = useState(false);
   const knownWordIdsRef = useRef(new Set());
   const celebratedRef = useRef(new Set());
+
+  // Milestones ("50 words discovered", ...) and mistake-log errors
+  const [milestonesReached, setMilestonesReached] = useState([]);
+  const [milestoneCard, setMilestoneCard] = useState(null);
+  const milestoneShownRef = useRef(new Set());
+  const [mistakeError, setMistakeError] = useState("");
 
   // Audio settings popover in the header (same localStorage keys as Settings)
   const [audioOpen, setAudioOpen] = useState(false);
@@ -511,6 +556,8 @@ const fetchWordsForLevel = async (levelNumber) => {
   // New word detection: a word with no row in user_progress has never been seen
   useEffect(() => {
     if (loading || gameOver || levelCompleted || !knownReady) return;
+    // A milestone pop-up goes first
+    if (milestoneCard || milestonesReached.some((m) => !milestoneShownRef.current.has(m))) return;
     const w = words[currentIndex];
     if (!w || celebratedRef.current.has(w.id) || knownWordIdsRef.current.has(w.id)) return;
     celebratedRef.current.add(w.id);
@@ -518,7 +565,19 @@ const fetchWordsForLevel = async (levelNumber) => {
     setNewWordCard({ english: w.english });
     playSound("newword");
     buzz([40, 50, 90]);
-  }, [loading, gameOver, levelCompleted, knownReady, currentIndex, words]);
+  }, [loading, gameOver, levelCompleted, knownReady, currentIndex, words, milestoneCard, milestonesReached]);
+
+  // Show a milestone pop-up as soon as no other pop-up is open
+  useEffect(() => {
+    if (milestoneCard || loading || gameOver || levelCompleted) return;
+    if (wrongAnswerCard || correctCard || newWordCard) return;
+    const next = milestonesReached.find((m) => !milestoneShownRef.current.has(m));
+    if (!next) return;
+    milestoneShownRef.current.add(next);
+    setMilestoneCard(next);
+    playSound("milestone");
+    buzz([60, 40, 60, 40, 140]);
+  }, [milestonesReached, milestoneCard, loading, gameOver, levelCompleted, wrongAnswerCard, correctCard, newWordCard]);
 
   // Optional auto-close for the new-word pop-up
   useEffect(() => {
@@ -626,23 +685,30 @@ const fetchWordsForLevel = async (levelNumber) => {
         if (insertError) throw insertError;
       }
 
+      // Count words discovered; announce milestones (50, 100, 250, ...)
+      const sizeBefore = knownWordIdsRef.current.size;
       knownWordIdsRef.current.add(wordId);
+      const sizeAfter = knownWordIdsRef.current.size;
+      if (knownReady && sizeAfter > sizeBefore && isMilestone(sizeAfter)) {
+        setMilestonesReached((list) => [...list, sizeAfter]);
+      }
 
-      // Keep a history of wrong answers (best effort: never blocks the game)
+      // History of wrong answers. Errors are shown on the wrong-answer card.
       if (!isCorrect) {
-        supabase
-          .from("word_mistakes")
-          .insert({
-            user_id: userId,
-            word_id: wordId,
-            user_answer: details.userAnswer || "",
-            correct_answer: details.correctAnswer || "",
-            level: details.level ?? null,
-            mode: "play",
-          })
-          .then(({ error: mistakeError }) => {
-            if (mistakeError) console.warn("Could not log mistake:", mistakeError.message);
-          });
+        const { error: mistakeInsertError } = await supabase.from("word_mistakes").insert({
+          user_id: userId,
+          word_id: wordId,
+          user_answer: details.userAnswer || "",
+          correct_answer: details.correctAnswer || "",
+          level: details.level ?? null,
+          mode: "play",
+        });
+        if (mistakeInsertError) {
+          console.error("Could not save mistake:", mistakeInsertError);
+          setMistakeError(mistakeInsertError.message || "Unknown error");
+        } else {
+          setMistakeError("");
+        }
       }
 
       setWordSaveStatus("saved");
@@ -658,7 +724,7 @@ const fetchWordsForLevel = async (levelNumber) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     // A question can be scored only once, including when the answer is blank.
-    if (answerLockedRef.current || gameOver || levelCompleted || loading || newWordCard) return;
+    if (answerLockedRef.current || gameOver || levelCompleted || loading || newWordCard || milestoneCard) return;
     answerLockedRef.current = true;
     setAnswerLocked(true);
     const userAnswer = answer.toLowerCase().trim();
@@ -713,7 +779,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     let newLives = lives;
     let streakBonusThisRound = 0;
 
-    const wordPoints = currentWord.difficulty || 1;
+    const wordPoints = currentLevel; // level 1 = 1 point, level 2 = 2 points, ...
 
     if (isCorrect) {
       playSound("correct");
@@ -895,6 +961,12 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
     pendingNextRef.current = next;
     clearTimeout(correctTimerRef.current);
     correctTimerRef.current = setTimeout(finishCorrectCard, CORRECT_CARD_MS);
+  };
+
+  const closeMilestoneCard = () => {
+    playSound("pop");
+    setMilestoneCard(null);
+    inputRef.current?.focus();
   };
 
   const closeNewWordCard = () => {
@@ -1311,6 +1383,12 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           </p>
         )}
 
+        {milestonesReached.length > 0 && (
+          <p style={{ ...styles.saveStatus, color: "#fcd34d" }}>
+            🏆 Milestone reached: {milestonesReached.map((m) => `${m.toLocaleString()} words`).join(" · ")}
+          </p>
+        )}
+
         {newWords.length > 0 && (
           <div style={{ ...styles.missedWordsSection, border: "1px solid rgba(251,191,36,0.35)" }}>
             <h2 style={{ ...styles.missedWordsTitle, color: "#fcd34d" }}>✨ New Words</h2>
@@ -1556,7 +1634,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           onChange={(e) => {
             // While an answer is being processed the bar ignores typing,
             // but it stays enabled so the keyboard stays open.
-            if (!answerLockedRef.current && !newWordCard) setAnswer(e.target.value);
+            if (!answerLockedRef.current && !newWordCard && !milestoneCard) setAnswer(e.target.value);
           }}
           placeholder="Type the translation..."
           autoComplete="off"
@@ -1576,7 +1654,7 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
         <button
           type="submit"
           style={styles.submitButton}
-          disabled={gameOver || answerLocked || levelCompleted || loading || !!newWordCard}
+          disabled={gameOver || answerLocked || levelCompleted || loading || !!newWordCard || !!milestoneCard}
           onMouseDown={(e) => e.preventDefault()}
         >
           Submit
@@ -1617,6 +1695,35 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
           </div>
           {reportStatus && <p style={styles.reportStatus} role="status">{reportStatus}</p>}
         </form>
+      )}
+
+      {milestoneCard && !wrongAnswerCard && (
+        <div role="dialog" aria-modal="true" aria-labelledby="milestone-title" style={styles.wrongAnswerOverlay}>
+          <Confetti />
+          <div
+            style={{
+              ...styles.wrongAnswerCard,
+              border: "1px solid rgba(251,191,36,0.6)",
+              boxShadow: "0 24px 70px rgba(0,0,0,0.5), 0 0 50px rgba(251,191,36,0.25)",
+            }}
+          >
+            <div style={{ ...styles.masteredIcon, animation: "splashPop 0.7s ease-out" }}>
+              {milestoneIcon(milestoneCard)}
+            </div>
+            <p style={styles.newWordEyebrow}>MILESTONE REACHED</p>
+            <h2 id="milestone-title" style={styles.wrongAnswerTitle}>
+              {milestoneCard.toLocaleString()} words discovered!
+            </h2>
+            <div style={styles.newWordBox}>
+              <strong style={styles.newWordEnglish}>{milestoneCard.toLocaleString()}</strong>
+              <span style={styles.newWordLabel}>WORDS IN YOUR WORDS</span>
+            </div>
+            <p style={styles.wrongAnswerNote}>{milestoneText(milestoneCard)}</p>
+            <button type="button" onClick={closeMilestoneCard} style={styles.wrongAnswerContinueButton}>
+              Keep going<span aria-hidden="true"> →</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {correctCard && !wrongAnswerCard && (
@@ -1706,6 +1813,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
                     : "No answer entered"}
                   {" · ❤️ One life lost"}
                 </p>
+                {mistakeError && (
+                  <p role="alert" style={styles.mistakeWarning}>
+                    ⚠️ This mistake could not be saved to your history: {mistakeError}
+                  </p>
+                )}
                 <button type="button" onClick={continueAfterWrongAnswer} style={styles.wrongAnswerContinueButton}>
                   {wrongAnswerCard.transition === "gameOver" ? "See Results" : wrongAnswerCard.transition === "nextLevel" ? "Continue" : "Next Question"}
                   <span aria-hidden="true"> →</span>
@@ -1734,6 +1846,11 @@ const normalizedWithHet = normalizeDutch(`het ${normalizedBase}`);
 }
 
 const styles = {
+  mistakeWarning: {
+    margin: "0 0 14px", padding: "8px 10px", borderRadius: "10px", fontSize: "12px", textAlign: "left",
+    color: "#fde68a", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.4)",
+    overflowWrap: "anywhere",
+  },
   // ---------- New word pop-up ----------
   newWordEyebrow: { margin: "0 0 5px", color: "#fcd34d", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
   newWordBox: { display: "flex", flexDirection: "column", gap: "7px", padding: "17px 14px", borderRadius: "16px", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.55)" },

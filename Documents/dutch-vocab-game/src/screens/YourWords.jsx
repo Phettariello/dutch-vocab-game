@@ -15,6 +15,13 @@ function YourWords({ goBack }) {
   const [categories, setCategories] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Mistake history pop-up
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [selectedWord, setSelectedWord] = useState(null);
+  const [mistakes, setMistakes] = useState([]);
+  const [mistakesLoading, setMistakesLoading] = useState(false);
+  const [mistakesError, setMistakesError] = useState("");
+
 
 
   // Stats states
@@ -44,6 +51,8 @@ const fetchWords = async () => {
       goBack();
       return;
     }
+
+    setCurrentUserId(userId);
 
     // 1. Fetch user_progress
     const { data: progressData, error: progressError } = await supabase
@@ -285,6 +294,40 @@ const fetchWords = async () => {
   // ============================================================================
   // LOADING STATE
   // ============================================================================
+  const openMistakes = async (entry) => {
+    setSelectedWord(entry);
+    setMistakes([]);
+    setMistakesError("");
+    setMistakesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("word_mistakes")
+        .select("id, user_answer, correct_answer, mode, level, created_at")
+        .eq("user_id", currentUserId)
+        .eq("word_id", entry.word_id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      setMistakes(data || []);
+    } catch (error) {
+      console.error("Error loading mistakes:", error);
+      setMistakesError(error.message || "Could not load mistakes.");
+    } finally {
+      setMistakesLoading(false);
+    }
+  };
+
+  const closeMistakes = () => setSelectedWord(null);
+
+  const formatDateTime = (value) =>
+    new Date(value).toLocaleString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -432,6 +475,65 @@ const fetchWords = async () => {
 
 
 
+      {/* MISTAKES POP-UP */}
+      {selectedWord && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mistakes-title"
+          style={styles.modalOverlay}
+          onClick={closeMistakes}
+        >
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <button style={styles.modalClose} onClick={closeMistakes} aria-label="Close">
+              ✕
+            </button>
+            <p style={styles.modalEyebrow}>WORD HISTORY</p>
+            <h2 id="mistakes-title" style={styles.modalTitle}>
+              {selectedWord.words.english}
+            </h2>
+            <div style={styles.modalDutchBox}>
+              <span style={styles.modalDutchLabel}>CORRECT ANSWER</span>
+              <strong style={styles.modalDutch}>{selectedWord.words.dutch}</strong>
+            </div>
+            <div style={styles.modalStats}>
+              <span>✅ {selectedWord.correct_count}</span>
+              <span>❌ {selectedWord.incorrect_count}</span>
+              <span>{selectedWord.mastered ? "🏅 Mastered" : `📊 ${selectedWord.masteryPercent}%`}</span>
+            </div>
+
+            <h3 style={styles.modalSectionTitle}>
+              Previous mistakes{mistakes.length > 0 ? ` (${mistakes.length})` : ""}
+            </h3>
+
+            {mistakesLoading ? (
+              <p style={styles.modalMuted}>Loading…</p>
+            ) : mistakesError ? (
+              <p style={styles.modalError}>⚠️ {mistakesError}</p>
+            ) : mistakes.length === 0 ? (
+              <p style={styles.modalMuted}>
+                No mistakes recorded for this word yet. Wrong answers are saved from now on.
+              </p>
+            ) : (
+              <div style={styles.mistakeList}>
+                {mistakes.map((m) => (
+                  <div key={m.id} style={styles.mistakeRow}>
+                    <div style={styles.mistakeAnswer}>
+                      {m.user_answer && m.user_answer.trim() ? m.user_answer : <em>No answer entered</em>}
+                    </div>
+                    <div style={styles.mistakeMeta}>
+                      {formatDateTime(m.created_at)}
+                      {m.mode ? ` · ${m.mode}` : ""}
+                      {m.level ? ` · level ${m.level}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* WORDS LIST */}
       <div style={styles.contentContainer}>
         {filteredWords.length === 0 ? (
@@ -456,7 +558,19 @@ const fetchWords = async () => {
             {/* Table Rows */}
             <div style={styles.tableBody}>
               {filteredWords.map((progress) => (
-                <div key={progress.id} style={styles.tableRow}>
+                <div
+                  key={progress.id}
+                  style={styles.tableRow}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openMistakes(progress)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openMistakes(progress);
+                    }
+                  }}
+                >
                   <div style={styles.colEnglish}>{progress.words.english}</div>
                   <div style={styles.colDutch}>{progress.words.dutch}</div>
                   <div style={styles.colMastery}>
@@ -489,6 +603,7 @@ const fetchWords = async () => {
             <div style={styles.resultCounter}>
               Showing {filteredWords.length} of {stats.total} words
             </div>
+            <div style={styles.tapHint}>Tap a word to see your past mistakes</div>
           </>
         )}
       </div>
@@ -502,6 +617,36 @@ const fetchWords = async () => {
 // STYLES - MOBILE OPTIMIZED
 // ============================================================================
 const styles = {
+  tapHint: { textAlign: "center", color: "#93c5fd", fontSize: "clamp(10px, 2vw, 11px)", paddingBottom: "16px" },
+  modalOverlay: {
+    position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom))",
+    background: "rgba(2, 6, 23, 0.82)", backdropFilter: "blur(8px)",
+  },
+  modalCard: {
+    position: "relative", width: "100%", maxWidth: "440px", maxHeight: "100%", overflowY: "auto",
+    boxSizing: "border-box", padding: "26px 20px 20px", borderRadius: "24px", color: "#f8fafc",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)", border: "1px solid rgba(148,163,184,0.35)",
+    boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+  },
+  modalClose: {
+    position: "absolute", top: "12px", right: "12px", width: "34px", height: "34px", borderRadius: "50%",
+    border: "1px solid rgba(148,163,184,0.4)", background: "rgba(255,255,255,0.08)", color: "white",
+    cursor: "pointer", fontSize: "15px",
+  },
+  modalEyebrow: { margin: "0 0 4px", color: "#67e8f9", fontSize: "11px", fontWeight: 900, letterSpacing: "2px" },
+  modalTitle: { margin: "0 0 12px", fontSize: "26px", fontWeight: 850, lineHeight: 1.2, paddingRight: "36px", overflowWrap: "anywhere" },
+  modalDutchBox: { display: "flex", flexDirection: "column", gap: "5px", padding: "12px 14px", borderRadius: "14px", background: "rgba(16,185,129,0.12)", border: "1px solid rgba(52,211,153,0.5)" },
+  modalDutchLabel: { color: "#6ee7b7", fontSize: "10px", fontWeight: 900, letterSpacing: "1.5px" },
+  modalDutch: { color: "#ecfdf5", fontSize: "22px", overflowWrap: "anywhere" },
+  modalStats: { display: "flex", justifyContent: "space-around", gap: "8px", margin: "14px 0 4px", fontSize: "14px", fontWeight: 700, color: "#bfdbfe" },
+  modalSectionTitle: { margin: "16px 0 10px", fontSize: "13px", fontWeight: 800, color: "#fca5a5", textTransform: "uppercase", letterSpacing: "0.5px" },
+  modalMuted: { margin: 0, color: "#93c5fd", fontSize: "14px", lineHeight: 1.5 },
+  modalError: { margin: 0, color: "#fde68a", fontSize: "13px", lineHeight: 1.5, overflowWrap: "anywhere" },
+  mistakeList: { display: "flex", flexDirection: "column", gap: "8px" },
+  mistakeRow: { padding: "10px 12px", borderRadius: "10px", background: "rgba(248,113,113,0.10)", border: "1px solid rgba(248,113,113,0.3)" },
+  mistakeAnswer: { fontSize: "16px", fontWeight: 700, color: "#fecaca", overflowWrap: "anywhere" },
+  mistakeMeta: { marginTop: "3px", fontSize: "11px", color: "#cbd5e1", textTransform: "capitalize" },
   container: {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
@@ -732,6 +877,7 @@ const styles = {
     color: "#bfdbfe",
     transition: "all 0.2s ease",
     overflow: "hidden",
+    cursor: "pointer",
   },
   colEnglish: {
     fontWeight: "600",
