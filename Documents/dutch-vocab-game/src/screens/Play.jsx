@@ -162,7 +162,7 @@ const buzz = (pattern) => {
   } catch (e) {}
 };
 
-const CORRECT_CARD_MS = 1400; // how long the "correct" pop-up stays (tap to skip)
+const CORRECT_CARD_MS = 2000; // how long the "correct" pop-up stays (tap to skip)
 const NEW_WORD_AUTOCLOSE_MS = 0; // 0 = wait for a tap; e.g. 2500 = close by itself
 
 // "Words discovered" milestones (total words in Your Words)
@@ -182,7 +182,7 @@ const milestoneIcon = (n) => (n >= 1000 ? "👑" : n >= 500 ? "🏆" : n >= 250 
 
 const PRAISE = [
   "Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!",
-  "You're the best! 🏅", "Who is the best? You are! 🙌", "Who is the strongest? /nYOU-ARE-THE-STRONGEST! 💪",
+  "You're the best! 🏅", "Who is the best? You are! 🙌", "Who is the strongest? YOU-ARE-THE-STRONGEST! 💪",
   "Look at you go!", "Genius move! 🧠", "Boom! Nailed it!", "You make it look easy!",
   "Dutch master in the making!", "Absolutely crushing it!", "That's how it's done!",
   "Smooth! 😎", "Top class!", "Wow, impressive!", "Gold star for you! ⭐", "Flawless!",
@@ -194,7 +194,7 @@ const PRAISE_HOT = [
 ];
 const PRAISE_BLAZING = [
   "Unstoppable! 🔥", "You're on a roll! 🚀", "Legendary streak! 👑",
-  "Is anyone better? Nope! 🏆", "Who is the strongest? /nYOU-ARE-THE-STRONGEST! 💪🔥", "Absolute machine! 🤖",
+  "Is anyone better? Nope! 🏆", "Who is the strongest? YOU-ARE-THE-STRONGEST! 💪🔥", "Absolute machine! 🤖",
 ];
 let lastPraise = "";
 const pickPraise = (streak) => {
