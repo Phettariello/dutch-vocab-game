@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
-import { playSound } from "../sounds";
+import { playSound, unlockAudio } from "../sounds";
+import { primeKeyboard, releaseKeyboardPrimer } from "../keyboardPrimer";
 
 // "Master" mode. The file is still called Review.jsx so Home.jsx keeps working.
 
@@ -44,6 +45,17 @@ const ACCURACY_BUCKETS = [
   { id: "100", label: "100%", test: (p) => p >= 100 },
 ];
 const ALL_BUCKET_IDS = ACCURACY_BUCKETS.map((b) => b.id);
+const ALL_DIFFICULTIES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+// The last filter choices are remembered on this device
+const PREFS_KEY = "masterFilterPrefs";
+const loadPrefs = () => {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS_KEY)) || null;
+  } catch (e) {
+    return null;
+  }
+};
 
 const PRAISE = [
   "Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!",
@@ -140,12 +152,12 @@ function Review({ goBack }) {
   const [selectedCategories, setSelectedCategories] = useState(new Set());
   const [selectedDifficulties, setSelectedDifficulties] = useState(new Set());
   const [selectedAccuracy, setSelectedAccuracy] = useState(new Set(ALL_BUCKET_IDS));
-  const [masteredFilter, setMasteredFilter] = useState("both");
-  const [shuffle, setShuffle] = useState(false);
+  const [masteredFilter, setMasteredFilter] = useState(() => loadPrefs()?.masteredFilter ?? "both");
+  const [shuffle, setShuffle] = useState(() => loadPrefs()?.shuffle ?? false);
+  const [started, setStarted] = useState(false); // false = choosing filters, true = playing
 
   // UI states
   const [categories, setCategories] = useState([]);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const [reportNotes, setReportNotes] = useState("");
@@ -385,9 +397,14 @@ function Review({ goBack }) {
         ].sort();
         setCategories(uniqueCategories);
 
-        setSelectedCategories(new Set(uniqueCategories));
-        setSelectedDifficulties(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
-        setSelectedAccuracy(new Set(ALL_BUCKET_IDS));
+        // Start from the last choices; fall back to "everything" so a round can always start
+        const prefs = loadPrefs();
+        const keepCats = (prefs?.categories || []).filter((c) => uniqueCategories.includes(c));
+        const keepDiffs = (prefs?.difficulties || []).filter((d) => ALL_DIFFICULTIES.includes(d));
+        const keepAcc = (prefs?.accuracy || []).filter((id) => ALL_BUCKET_IDS.includes(id));
+        setSelectedCategories(new Set(keepCats.length ? keepCats : uniqueCategories));
+        setSelectedDifficulties(new Set(keepDiffs.length ? keepDiffs : ALL_DIFFICULTIES));
+        setSelectedAccuracy(new Set(keepAcc.length ? keepAcc : ALL_BUCKET_IDS));
 
         setWords(wordsWithProgress);
       } catch (error) {
@@ -406,54 +423,48 @@ function Review({ goBack }) {
   }, []);
 
   // ============================================================================
-  // EFFECT: Apply filters and shuffle
+  // FILTERS: which words match, and the list for one round
   // ============================================================================
-  useEffect(() => {
-    let filtered = words;
+  // Counts answered in this visit are merged in, so a new round sees fresh numbers
+  const effectiveWords = useMemo(
+    () => words.map((w) => (live[w.id] ? { ...w, ...live[w.id] } : w)),
+    [words, live]
+  );
 
-    if (selectedCategories.size > 0) {
-      filtered = filtered.filter((w) => selectedCategories.has(w.category));
-    }
+  const filterWords = (source) => {
+    const active = ACCURACY_BUCKETS.filter((b) => selectedAccuracy.has(b.id));
+    return source.filter(
+      (w) =>
+        selectedCategories.has(w.category) &&
+        selectedDifficulties.has(w.difficulty) &&
+        active.some((b) => b.test(w.masteryPercent)) &&
+        (masteredFilter === "both" || (masteredFilter === "mastered" ? w.mastered : !w.mastered))
+    );
+  };
 
-    if (selectedDifficulties.size > 0) {
-      filtered = filtered.filter((w) => selectedDifficulties.has(w.difficulty));
-    }
+  const matchingCount = useMemo(
+    () => filterWords(effectiveWords).length,
+    [effectiveWords, selectedCategories, selectedDifficulties, selectedAccuracy, masteredFilter]
+  );
 
-    if (selectedAccuracy.size > 0) {
-      const active = ACCURACY_BUCKETS.filter((b) => selectedAccuracy.has(b.id));
-      filtered = filtered.filter((w) => active.some((b) => b.test(w.masteryPercent)));
-    }
+  const buildRound = (source) => {
+    const list = filterWords(source);
+    return shuffle ? shuffleArray(list) : [...list].sort((a, b) => a.masteryPercent - b.masteryPercent);
+  };
 
-    if (masteredFilter === "nonmastered") {
-      filtered = filtered.filter((w) => !w.mastered);
-    } else if (masteredFilter === "mastered") {
-      filtered = filtered.filter((w) => w.mastered);
-    }
-
-    if (shuffle) {
-      filtered = shuffleArray(filtered);
-    } else {
-      filtered = [...filtered].sort((a, b) => a.masteryPercent - b.masteryPercent);
-    }
-
-    setReviewWords(filtered);
-    setCurrentIndex(0);
-    setHintOpen(false);
-    setFinished(false);
-    answerLockedRef.current = false;
-    setLocked(false);
-  }, [words, selectedCategories, selectedDifficulties, selectedAccuracy, masteredFilter, shuffle]);
 
   // ============================================================================
   // EFFECT: Keep the cursor in the answer bar
   // ============================================================================
   useEffect(() => {
-    if (loading || finished) return;
+    if (loading || finished || !started) return;
+    inputRef.current?.focus();
+    releaseKeyboardPrimer();
     const timer = setTimeout(() => {
       inputRef.current?.focus();
     }, 300);
     return () => clearTimeout(timer);
-  }, [currentIndex, loading, finished]);
+  }, [currentIndex, loading, finished, started]);
 
   // iPhone: detect when the keyboard is open so the top area can shrink
   useEffect(() => {
@@ -707,18 +718,83 @@ function Review({ goBack }) {
     ...(active ? styles.chipActive : {}),
   });
 
-  const renderFilters = () => (
-    <div style={styles.filtersPanel}>
-      <button onClick={() => setFiltersOpen(!filtersOpen)} style={styles.filterToggle}>
-        <span>🔧 Filters · {reviewWords.length} words</span>
-        <span aria-hidden="true">{filtersOpen ? "▲" : "▼"}</span>
-      </button>
+  const savePrefs = () => {
+    try {
+      localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({
+          categories: [...selectedCategories],
+          difficulties: [...selectedDifficulties],
+          accuracy: [...selectedAccuracy],
+          masteredFilter,
+          shuffle,
+        })
+      );
+    } catch (e) {
+      // remembering the choices is optional
+    }
+  };
 
-      {filtersOpen && (
-        <div style={styles.filtersContent}>
-          <div style={styles.filterGroup}>
+  // Start a round with the chosen filters (also used by "Go again")
+  const startRound = () => {
+    const list = buildRound(effectiveWords);
+    if (list.length === 0) {
+      setStarted(false);
+      setFinished(false);
+      setNotice({
+        type: "info",
+        title: "No words match",
+        message: "Nothing matches these filters. Try more categories, levels or accuracy ranges.",
+      });
+      return;
+    }
+    savePrefs();
+    // Sound and keyboard can only start during this tap
+    unlockAudio();
+    primeKeyboard();
+    clearTimeout(correctTimerRef.current);
+    pendingNextRef.current = null;
+    setCard(null);
+    setCorrectCard(null);
+    setReportOpen(false);
+    setHintOpen(false);
+    setAnswer("");
+    setReviewWords(list);
+    setCurrentIndex(0);
+    setSessionStats({ correct: 0, total: 0 });
+    setStreak(0);
+    setFinished(false);
+    answerLockedRef.current = false;
+    setLocked(false);
+    setStarted(true);
+  };
+
+  // Back to the filter screen (the round is over or abandoned; answers are already saved)
+  const backToSetup = () => {
+    clearTimeout(correctTimerRef.current);
+    pendingNextRef.current = null;
+    setCard(null);
+    setCorrectCard(null);
+    setReportOpen(false);
+    setHintOpen(false);
+    setAnswer("");
+    setFinished(false);
+    setStarted(false);
+  };
+
+  const renderSetup = () => (
+    <div style={styles.shell}>
+      <div style={styles.shellHeader}>{renderHeader("← Menu", goBack)}</div>
+
+      <div style={styles.scrollArea}>
+        <div style={styles.selectionBody}>
+          <p style={styles.selectionSubtitle}>
+            Choose which of your words to master. Your last choices are remembered.
+          </p>
+
+          <section style={styles.card}>
             <div style={styles.filterHeader}>
-              <h4 style={styles.filterTitle}>Categories</h4>
+              <h2 style={styles.setupTitle}>Categories</h2>
               <button onClick={toggleAllCategories} style={styles.selectAllBtn}>
                 {selectedCategories.size === categories.length ? "Deselect all" : "Select all"}
               </button>
@@ -736,17 +812,17 @@ function Review({ goBack }) {
                 </label>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div style={styles.filterGroup}>
+          <section style={styles.card}>
             <div style={styles.filterHeader}>
-              <h4 style={styles.filterTitle}>Difficulty (1-10)</h4>
+              <h2 style={styles.setupTitle}>Difficulty (1-10)</h2>
               <button onClick={toggleAllDifficulties} style={styles.selectAllBtn}>
                 {selectedDifficulties.size === 10 ? "Deselect all" : "Select all"}
               </button>
             </div>
             <div style={styles.chipGrid5}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+              {ALL_DIFFICULTIES.map((level) => (
                 <label
                   key={level}
                   style={{ ...chip(selectedDifficulties.has(level)), justifyContent: "center" }}
@@ -761,11 +837,11 @@ function Review({ goBack }) {
                 </label>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div style={styles.filterGroup}>
+          <section style={styles.card}>
             <div style={styles.filterHeader}>
-              <h4 style={styles.filterTitle}>Accuracy</h4>
+              <h2 style={styles.setupTitle}>Accuracy</h2>
               <button onClick={toggleAllAccuracy} style={styles.selectAllBtn}>
                 {selectedAccuracy.size === ACCURACY_BUCKETS.length ? "Deselect all" : "Select all"}
               </button>
@@ -786,10 +862,10 @@ function Review({ goBack }) {
                 </label>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div style={styles.filterGroup}>
-            <h4 style={styles.filterTitle}>Word status</h4>
+          <section style={styles.card}>
+            <h2 style={{ ...styles.setupTitle, marginBottom: 12 }}>Word status</h2>
             <div style={styles.segmented}>
               {[
                 ["both", "All"],
@@ -809,9 +885,10 @@ function Review({ goBack }) {
                 </button>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div style={styles.filterGroup}>
+          <section style={styles.card}>
+            <h2 style={{ ...styles.setupTitle, marginBottom: 12 }}>Order</h2>
             <label style={{ ...chip(shuffle), justifyContent: "center" }}>
               <input
                 type="checkbox"
@@ -821,9 +898,34 @@ function Review({ goBack }) {
               />
               🔀 Shuffle order
             </label>
-          </div>
+            <p style={styles.hintText}>
+              {shuffle ? "Words come in a random order." : "Your weakest words come first."}
+            </p>
+          </section>
         </div>
-      )}
+      </div>
+
+      <div style={styles.footerBar}>
+        <div style={styles.footerInner}>
+          <p style={styles.matchText}>
+            {matchingCount === 0
+              ? "No words match these filters"
+              : `${matchingCount.toLocaleString()} ${matchingCount === 1 ? "word matches" : "words match"}`}
+          </p>
+          <button
+            type="button"
+            onClick={startRound}
+            disabled={matchingCount === 0}
+            style={{
+              ...styles.primaryButton,
+              opacity: matchingCount === 0 ? 0.5 : 1,
+              cursor: matchingCount === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            Start round →
+          </button>
+        </div>
+      </div>
     </div>
   );
 
@@ -1052,7 +1154,7 @@ function Review({ goBack }) {
   // ============================================================================
   // HEADER (title, sound settings, menu)
   // ============================================================================
-  const header = (
+  const renderHeader = (backLabel, onBack) => (
     <div style={styles.header}>
       <h1 style={styles.title}>🎯 Master</h1>
       <div style={styles.headerRight}>
@@ -1066,7 +1168,7 @@ function Review({ goBack }) {
           {sfxOn || musicOn ? "🔊" : "🔇"}
         </button>
         <button
-          onClick={goBack}
+          onClick={onBack}
           style={styles.backButton}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = "#0891b2";
@@ -1077,7 +1179,7 @@ function Review({ goBack }) {
             e.currentTarget.style.transform = "scale(1)";
           }}
         >
-          {keyboardOpen ? "←" : "← Menu"}
+          {backLabel}
         </button>
       </div>
 
@@ -1152,21 +1254,12 @@ function Review({ goBack }) {
   );
 
   // ============================================================================
-  // NO WORDS AFTER FILTERS
+  // SETUP (choose filters before the round)
   // ============================================================================
-  if (reviewWords.length === 0) {
+  if (!started) {
     return (
       <>
-        <div style={styles.container}>
-          <div style={styles.stickyTop}>{header}</div>
-          <div style={{ height: 12 }} />
-          {renderFilters()}
-          <div style={styles.emptyMessage}>
-            <div style={{ fontSize: 48 }}>🔍</div>
-            <p style={styles.emptyTitle}>No words match these filters</p>
-            <p style={styles.emptyText}>Open the filters above and select more categories, levels or accuracy ranges.</p>
-          </div>
-        </div>
+        {renderSetup()}
         {popups}
       </>
     );
@@ -1199,18 +1292,11 @@ function Review({ goBack }) {
             </div>
           </div>
           <div style={styles.finishButtons}>
-            <button
-              onClick={() => {
-                setFinished(false);
-                setCurrentIndex(0);
-                setSessionStats({ correct: 0, total: 0 });
-                setStreak(0);
-                answerLockedRef.current = false;
-                setLocked(false);
-              }}
-              style={styles.primaryButton}
-            >
+            <button onClick={startRound} style={styles.primaryButton}>
               Go again
+            </button>
+            <button onClick={backToSetup} style={styles.secondaryButton}>
+              Change filters
             </button>
             <button onClick={goBack} style={styles.secondaryButton}>
               ← Menu
@@ -1232,7 +1318,7 @@ function Review({ goBack }) {
     <>
       <div style={styles.container}>
         <div style={styles.stickyTop}>
-          {header}
+          {renderHeader(keyboardOpen ? "←" : "← Back", backToSetup)}
 
           <div style={keyboardOpen ? styles.hudCompact : styles.hud}>
             <div style={styles.scoreWrap}>
@@ -1259,7 +1345,6 @@ function Review({ goBack }) {
         </div>
 
         <div style={{ height: 12 }} />
-        {renderFilters()}
 
         <div style={styles.questionContainer}>
           <p style={styles.questionLabel}>
@@ -1546,6 +1631,60 @@ const styles = {
     background: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
     transition: "width 0.3s ease",
   },
+
+  // ---------- Setup screen ----------
+  shell: {
+    position: "fixed",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    fontFamily: FONT,
+    overflow: "hidden",
+  },
+  shellHeader: { position: "relative", zIndex: 100, flex: "0 0 auto" },
+  scrollArea: {
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
+    overscrollBehavior: "contain",
+  },
+  selectionBody: {
+    width: "100%",
+    maxWidth: "600px",
+    margin: "0 auto",
+    padding: "16px",
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  selectionSubtitle: { fontSize: "14px", color: "#bfdbfe", textAlign: "center", margin: "0" },
+  card: {
+    background: "rgba(30, 58, 138, 0.8)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "12px",
+    padding: "14px",
+  },
+  setupTitle: { fontSize: "16px", fontWeight: "700", color: "#67e8f9", margin: "0 0 12px" },
+  hintText: { margin: "10px 0 0", fontSize: "12px", color: "#93c5fd", lineHeight: 1.4 },
+  footerBar: {
+    flex: "0 0 auto",
+    padding: "10px 16px max(12px, env(safe-area-inset-bottom))",
+    background: "#10224f",
+    borderTop: "1px solid rgba(6,182,212,0.3)",
+    boxShadow: "0 -6px 18px rgba(0,0,0,0.3)",
+  },
+  footerInner: {
+    maxWidth: "600px",
+    margin: "0 auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  matchText: { margin: 0, textAlign: "center", color: "#bfdbfe", fontSize: "13px", fontWeight: "600" },
 
   // ---------- Filters ----------
   filtersPanel: {
