@@ -17,6 +17,16 @@ const ACCURACY_BUCKETS = [
 ];
 const ALL_BUCKET_IDS = ACCURACY_BUCKETS.map((b) => b.id);
 
+// The last filter choices are remembered on this device
+const PREFS_KEY = "practiceFilterPrefs";
+const loadPrefs = () => {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS_KEY)) || null;
+  } catch (e) {
+    return null;
+  }
+};
+
 const STATUS_OPTIONS = [
   ["both", "All"],
   ["new", "New"],
@@ -366,9 +376,9 @@ function Practice({ goBack }) {
   const [selectedCategories, setSelectedCategories] = useState(() => new Set());
   const [selectedDifficulties, setSelectedDifficulties] = useState(() => new Set());
   const [selectedAccuracy, setSelectedAccuracy] = useState(() => new Set(ALL_BUCKET_IDS));
-  const [statusFilter, setStatusFilter] = useState("both");
-  const [shuffle, setShuffle] = useState(true);
-  const [roundSize, setRoundSize] = useState(20);
+  const [statusFilter, setStatusFilter] = useState(() => loadPrefs()?.statusFilter ?? "both");
+  const [shuffle, setShuffle] = useState(() => loadPrefs()?.shuffle ?? true);
+  const [roundSize, setRoundSize] = useState(() => loadPrefs()?.roundSize ?? 20);
 
   const [session, setSession] = useState(null); // { id, words }
   const [notice, setNotice] = useState(null);
@@ -391,6 +401,17 @@ function Practice({ goBack }) {
         setUserId(uid);
         setAllWords(wordRows);
         setProgress(progressMap);
+
+        // Start from the last choices; first time (or if nothing is left) everything is selected,
+        // so a round can always start
+        const prefs = loadPrefs();
+        const cats = [...new Set(wordRows.map((w) => w.category).filter(Boolean))];
+        const keepCats = (prefs?.categories || []).filter((c) => cats.includes(c));
+        const keepDiffs = (prefs?.difficulties || []).filter((d) => ALL_DIFFICULTIES.includes(d));
+        const keepAcc = (prefs?.accuracy || []).filter((id) => ALL_BUCKET_IDS.includes(id));
+        setSelectedCategories(new Set(keepCats.length ? keepCats : cats));
+        setSelectedDifficulties(new Set(keepDiffs.length ? keepDiffs : ALL_DIFFICULTIES));
+        setSelectedAccuracy(new Set(keepAcc.length ? keepAcc : ALL_BUCKET_IDS));
       } catch (error) {
         console.error("Error loading practice data:", error);
         if (active) setLoadError(error?.message || "Please check your connection and try again.");
@@ -435,8 +456,27 @@ function Practice({ goBack }) {
 
   const matching = useMemo(() => filterWords(progress), [filterWords, progress]);
 
+  const savePrefs = () => {
+    try {
+      localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({
+          categories: [...selectedCategories],
+          difficulties: [...selectedDifficulties],
+          accuracy: [...selectedAccuracy],
+          statusFilter,
+          shuffle,
+          roundSize,
+        })
+      );
+    } catch (e) {
+      // remembering the choices is optional
+    }
+  };
+
   // Random order, or weakest words first
   const buildSession = (list) => {
+    savePrefs();
     const ordered = shuffleArray(list);
     if (!shuffle) ordered.sort((a, b) => a.mastery - b.mastery);
     let picked = ordered.map((x) => x.word);
@@ -566,7 +606,7 @@ function Practice({ goBack }) {
       <div style={styles.scrollArea}>
         <div style={styles.selectionBody}>
           <p style={styles.selectionSubtitle}>
-            Pick what you want to practise. Your progress is saved.
+            Pick what you want to practise. Your last choices are remembered.
           </p>
 
           <section style={styles.card}>
