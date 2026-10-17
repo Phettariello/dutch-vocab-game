@@ -1,8 +1,66 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { primeKeyboard, releaseKeyboardPrimer } from "../keyboardPrimer";
+import { playSound, buzz, unlockAudio } from "../sounds";
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const CORRECT_CARD_MS = 1400; // how long the "correct" pop-up stays (tap to skip)
+const ALL_DIFFICULTIES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+// Same accuracy buckets as Review / Your Words
+const ACCURACY_BUCKETS = [
+  { id: "0-25", label: "0–25%", test: (p) => p < 25 },
+  { id: "25-50", label: "25–50%", test: (p) => p >= 25 && p < 50 },
+  { id: "50-75", label: "50–75%", test: (p) => p >= 50 && p < 75 },
+  { id: "75-99", label: "75–99%", test: (p) => p >= 75 && p < 100 },
+  { id: "100", label: "100%", test: (p) => p >= 100 },
+];
+const ALL_BUCKET_IDS = ACCURACY_BUCKETS.map((b) => b.id);
+
+const STATUS_OPTIONS = [
+  ["both", "All"],
+  ["new", "New"],
+  ["learning", "Learning"],
+  ["mastered", "Mastered"],
+];
+const ROUND_SIZES = [
+  [10, "10"],
+  [20, "20"],
+  [50, "50"],
+  [0, "All"],
+];
+
+// "Words discovered" milestones (same as Play)
+const MILESTONES = [50, 100, 150, 250, 500, 750, 1000];
+const isMilestone = (n) => MILESTONES.includes(n) || (n > 1000 && n % 250 === 0);
+const MILESTONE_TEXT = {
+  50: "Your Dutch vocabulary is taking off!",
+  100: "Triple digits! You are building something real.",
+  150: "150 words! Keep going!",
+  250: "A quarter of a thousand. Impressive!",
+  500: "500 words! You could hold a real conversation now.",
+  750: "750 words. You are on a roll!",
+  1000: "ONE THOUSAND words. Legendary!",
+};
+const milestoneText = (n) => MILESTONE_TEXT[n] || "Another big step on your Dutch journey!";
+const milestoneIcon = (n) => (n >= 1000 ? "👑" : n >= 500 ? "🏆" : n >= 250 ? "🌟" : "🎉");
+
+const PRAISE = [
+  "Great!", "Nice one!", "Spot on!", "Perfect!", "Well done!", "Brilliant!",
+  "You're the best! 🏅", "Look at you go!", "Genius move! 🧠", "Boom! Nailed it!",
+  "You make it look easy!", "Dutch master in the making!", "That's how it's done!",
+  "Smooth! 😎", "Top class!", "Flawless!", "Tulip-level talent! 🌷", "Hoera! 🎉",
+];
+const PRAISE_HOT = ["On fire! 🔥", "You're heating up! 🔥", "Hot streak! 🔥", "Can't stop, won't stop!"];
+const PRAISE_BLAZING = ["Unstoppable! 🔥", "You're on a roll! 🚀", "Legendary streak! 👑", "Absolute machine! 🤖"];
+let lastPraise = "";
+const pickPraise = (streak) => {
+  const list = streak >= 5 ? PRAISE_BLAZING : streak >= 3 ? PRAISE_HOT : PRAISE;
+  let choice = list[Math.floor(Math.random() * list.length)];
+  if (choice === lastPraise) choice = list[(list.indexOf(choice) + 1) % list.length];
+  lastPraise = choice;
+  return choice;
+};
 
 const KEYFRAMES = `
 @keyframes pConfettiFall {
@@ -14,11 +72,80 @@ const KEYFRAMES = `
   60%  { opacity: 1; transform: scale(1.2); }
   100% { opacity: 1; transform: scale(1); }
 }
+@keyframes pCardPop {
+  0%   { opacity: 0; transform: scale(0.7) translateY(10px); }
+  60%  { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes pTimerShrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+@keyframes pSparkle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  50%      { transform: rotate(12deg) scale(1.15); }
+}
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
 `;
 
+const shuffleArray = (list) => {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
+const normalize = (str) =>
+  str
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/ï/g, "i")
+    .replace(/ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/\s+/g, " ");
+
+// Supabase returns max 1000 rows per request, so read big tables page by page
+async function fetchAllRows(buildQuery) {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await buildQuery().range(from, from + 999);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
+// word_id -> { correct, incorrect, mastered } (rows of the same word are summed)
+async function loadProgress(userId) {
+  const rows = await fetchAllRows(() =>
+    supabase
+      .from("user_progress")
+      .select("word_id, correct_count, incorrect_count, mastered")
+      .eq("user_id", userId)
+      .order("id")
+  );
+  const map = new Map();
+  rows.forEach((r) => {
+    const cur = map.get(r.word_id) || { correct: 0, incorrect: 0, mastered: false };
+    cur.correct += r.correct_count || 0;
+    cur.incorrect += r.incorrect_count || 0;
+    cur.mastered = cur.mastered || !!r.mastered;
+    map.set(r.word_id, cur);
+  });
+  return map;
+}
+
+// ============================================================================
+// SHARED PIECES
+// ============================================================================
 function Confetti() {
   const pieces = useMemo(
     () =>
@@ -32,7 +159,7 @@ function Confetti() {
     []
   );
   return (
-    <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
+    <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 1100 }}>
       {pieces.map((p, i) => (
         <span
           key={i}
@@ -52,16 +179,18 @@ function Confetti() {
   );
 }
 
+const NOTICE_THEME = {
+  success: { icon: "✓", color: "#6ee7b7", bg: "rgba(16,185,129,0.15)", border: "#34d399" },
+  error: { icon: "✕", color: "#fca5a5", bg: "rgba(248,113,113,0.15)", border: "#f87171" },
+  info: { icon: "i", color: "#93c5fd", bg: "rgba(59,130,246,0.15)", border: "#60a5fa" },
+};
+
 // Simple pop-up used instead of the browser alert boxes
 function NoticeModal({ notice, onClose }) {
   if (!notice) return null;
-  const theme = {
-    error: { icon: "✕", color: "#fca5a5", bg: "rgba(248,113,113,0.15)", border: "#f87171" },
-    info: { icon: "i", color: "#93c5fd", bg: "rgba(59,130,246,0.15)", border: "#60a5fa" },
-  }[notice.type || "info"];
-
+  const theme = NOTICE_THEME[notice.type || "info"];
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="practice-notice-title" style={styles.overlay}>
+    <div role="dialog" aria-modal="true" aria-labelledby="practice-notice-title" style={{ ...styles.overlay, zIndex: 1200 }}>
       <div style={styles.modalCard}>
         <div style={{ ...styles.modalIcon, color: theme.color, background: theme.bg, borderColor: theme.border }}>
           {theme.icon}
@@ -74,68 +203,261 @@ function NoticeModal({ notice, onClose }) {
   );
 }
 
+// Header with sound settings (same as Play / Review). Always visible.
+function PracticeHeader({ title, backLabel, onBack, onPopoverClose }) {
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [sfxOn, setSfxOn] = useState(() => localStorage.getItem("soundEnabled") !== "false");
+  const [sfxVol, setSfxVol] = useState(() => {
+    const v = parseFloat(localStorage.getItem("volume"));
+    return Number.isNaN(v) ? 70 : v;
+  });
+  const [musicOn, setMusicOn] = useState(() => localStorage.getItem("backgroundMusicEnabled") !== "false");
+  const [musicVol, setMusicVol] = useState(() => {
+    const raw = localStorage.getItem("backgroundMusicVolume");
+    const v = Number(raw);
+    return raw === null || Number.isNaN(v) ? 20 : v;
+  });
+
+  const closeAudio = () => {
+    setAudioOpen(false);
+    onPopoverClose?.();
+  };
+  const changeSfxOn = (on) => {
+    setSfxOn(on);
+    localStorage.setItem("soundEnabled", String(on));
+    if (on) setTimeout(() => playSound("pop"), 30);
+  };
+  const changeSfxVol = (v) => {
+    setSfxVol(v);
+    localStorage.setItem("volume", String(v));
+  };
+  const applyMusic = (enabled, vol) => {
+    localStorage.setItem("backgroundMusicEnabled", String(enabled));
+    localStorage.setItem("backgroundMusicVolume", String(vol));
+    window.dispatchEvent(new CustomEvent("background-music-setting-changed"));
+    document.querySelectorAll("audio").forEach((audio) => {
+      const source = audio.currentSrc || audio.src || "";
+      if (source.includes("background-music")) {
+        audio.volume = vol / 100;
+        if (enabled && audio.paused) audio.play().catch(() => {});
+      }
+    });
+  };
+  const changeMusicOn = (on) => {
+    setMusicOn(on);
+    applyMusic(on, musicVol);
+  };
+  const changeMusicVol = (v) => {
+    setMusicVol(v);
+    applyMusic(musicOn, v);
+  };
+
+  return (
+    <div style={styles.header}>
+      <h1 style={styles.title}>{title}</h1>
+      <div style={styles.headerRight}>
+        <button
+          type="button"
+          onClick={() => setAudioOpen((v) => !v)}
+          style={styles.audioButton}
+          aria-label="Sound settings"
+          aria-expanded={audioOpen}
+        >
+          {sfxOn || musicOn ? "🔊" : "🔇"}
+        </button>
+        <button
+          onClick={onBack}
+          style={styles.backButton}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#0891b2";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#06b6d4";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          {backLabel}
+        </button>
+      </div>
+
+      {audioOpen && (
+        <>
+          <div style={styles.audioBackdrop} onClick={closeAudio} />
+          <div style={styles.audioPopover} role="dialog" aria-label="Sound settings">
+            <div style={styles.audioRow}>
+              <span style={styles.audioLabel}>🔊 Sound effects</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sfxOn}
+                aria-label="Sound effects"
+                onClick={() => changeSfxOn(!sfxOn)}
+                style={styles.audioToggle(sfxOn)}
+              >
+                <span style={styles.audioKnob(sfxOn)} />
+              </button>
+            </div>
+            <div style={styles.audioSliderRow}>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={sfxVol}
+                disabled={!sfxOn}
+                aria-label="Sound effects volume"
+                onChange={(e) => changeSfxVol(Number(e.target.value))}
+                onPointerUp={() => playSound("pop")}
+                style={styles.audioRange}
+              />
+              <strong style={styles.audioValue}>{sfxVol}%</strong>
+            </div>
+
+            <div style={{ ...styles.audioRow, marginTop: 10 }}>
+              <span style={styles.audioLabel}>🎵 Music</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={musicOn}
+                aria-label="Background music"
+                onClick={() => changeMusicOn(!musicOn)}
+                style={styles.audioToggle(musicOn)}
+              >
+                <span style={styles.audioKnob(musicOn)} />
+              </button>
+            </div>
+            <div style={styles.audioSliderRow}>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={musicVol}
+                disabled={!musicOn}
+                aria-label="Music volume"
+                onChange={(e) => changeMusicVol(Number(e.target.value))}
+                style={styles.audioRange}
+              />
+              <strong style={styles.audioValue}>{musicVol}%</strong>
+            </div>
+
+            <button type="button" onClick={closeAudio} style={styles.audioDone}>
+              Done
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ============================================================================
 // SELECTION SCREEN
 // ============================================================================
 function Practice({ goBack }) {
-  const [categories, setCategories] = useState([]);
-  const [selectedCategories, setSelectedCategories] = useState([]);
-  const [selectedDifficulties, setSelectedDifficulties] = useState([]);
+  const [allWords, setAllWords] = useState([]);
+  const [progress, setProgress] = useState(() => new Map());
+  const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [practiceStarted, setPracticeStarted] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const [selectedCategories, setSelectedCategories] = useState(() => new Set());
+  const [selectedDifficulties, setSelectedDifficulties] = useState(() => new Set());
+  const [selectedAccuracy, setSelectedAccuracy] = useState(() => new Set(ALL_BUCKET_IDS));
+  const [statusFilter, setStatusFilter] = useState("both");
+  const [shuffle, setShuffle] = useState(true);
+  const [roundSize, setRoundSize] = useState(20);
+
+  const [session, setSession] = useState(null); // { id, words }
   const [notice, setNotice] = useState(null);
 
-  const difficulties = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
+  // Load every word + the player's progress once
   useEffect(() => {
-    const fetchCategories = async () => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      setLoadError("");
       try {
-        const { data, error } = await supabase.from("words").select("category");
-        if (error) throw error;
-
-        const uniqueCategories = [
-          ...new Set(data.map((w) => w.category).filter((c) => c)),
-        ].sort();
-        setCategories(uniqueCategories);
+        const { data: userData } = await supabase.auth.getUser();
+        const uid = userData?.user?.id;
+        if (!uid) throw new Error("You must be signed in to practise.");
+        const [wordRows, progressMap] = await Promise.all([
+          fetchAllRows(() => supabase.from("words").select("*").order("id")),
+          loadProgress(uid),
+        ]);
+        if (!active) return;
+        setUserId(uid);
+        setAllWords(wordRows);
+        setProgress(progressMap);
       } catch (error) {
-        console.error("Error fetching categories:", error);
-        setNotice({
-          type: "error",
-          title: "Couldn't load categories",
-          message: "Please check your connection and try again.",
-        });
+        console.error("Error loading practice data:", error);
+        if (active) setLoadError(error?.message || "Please check your connection and try again.");
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [reloadKey]);
 
-    fetchCategories();
-  }, []);
+  const categories = useMemo(
+    () => [...new Set(allWords.map((w) => w.category).filter(Boolean))].sort(),
+    [allWords]
+  );
 
-  const toggleCategory = (category) => {
-    setSelectedCategories((prev) =>
-      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category]
-    );
+  // Words that match the filters. New (never seen) words count as 0% accuracy.
+  const filterWords = useCallback(
+    (progressMap) => {
+      if (selectedCategories.size === 0 || selectedDifficulties.size === 0) return [];
+      const buckets = ACCURACY_BUCKETS.filter((b) => selectedAccuracy.has(b.id));
+      const out = [];
+      for (const w of allWords) {
+        if (!selectedCategories.has(w.category) || !selectedDifficulties.has(w.difficulty)) continue;
+        const p = progressMap.get(w.id);
+        const seen = !!p;
+        const total = p ? p.correct + p.incorrect : 0;
+        const mastery = total > 0 ? Math.round((p.correct / total) * 100) : 0;
+        const mastered = !!p?.mastered;
+        if (statusFilter === "new" && seen) continue;
+        if (statusFilter === "learning" && (!seen || mastered)) continue;
+        if (statusFilter === "mastered" && !mastered) continue;
+        if (!buckets.some((b) => b.test(mastery))) continue;
+        out.push({ word: w, mastery });
+      }
+      return out;
+    },
+    [allWords, selectedCategories, selectedDifficulties, selectedAccuracy, statusFilter]
+  );
+
+  const matching = useMemo(() => filterWords(progress), [filterWords, progress]);
+
+  // Random order, or weakest words first
+  const buildSession = (list) => {
+    const ordered = shuffleArray(list);
+    if (!shuffle) ordered.sort((a, b) => a.mastery - b.mastery);
+    let picked = ordered.map((x) => x.word);
+    if (roundSize > 0) picked = picked.slice(0, roundSize);
+    return { id: Date.now(), words: picked };
   };
 
-  const toggleAllCategories = () => {
-    setSelectedCategories(selectedCategories.length === categories.length ? [] : [...categories]);
+  const refreshProgress = async () => {
+    if (!userId) return progress;
+    try {
+      const map = await loadProgress(userId);
+      setProgress(map);
+      return map;
+    } catch (error) {
+      console.error("Could not refresh progress:", error);
+      return progress;
+    }
   };
 
-  const toggleDifficulty = (difficulty) => {
-    setSelectedDifficulties((prev) =>
-      prev.includes(difficulty) ? prev.filter((d) => d !== difficulty) : [...prev, difficulty]
-    );
-  };
-
-  const toggleAllDifficulties = () => {
-    setSelectedDifficulties(
-      selectedDifficulties.length === difficulties.length ? [] : [...difficulties]
-    );
-  };
-
-  const handleStartPractice = () => {
-    if (selectedCategories.length === 0 || selectedDifficulties.length === 0) {
+  const handleStart = () => {
+    if (selectedCategories.size === 0 || selectedDifficulties.size === 0) {
       setNotice({
         type: "info",
         title: "Almost there",
@@ -143,55 +465,105 @@ function Practice({ goBack }) {
       });
       return;
     }
-    // Open the keyboard during this tap; the answer bar takes over when it appears
+    if (matching.length === 0) {
+      setNotice({
+        type: "info",
+        title: "No words match",
+        message: "Nothing matches these filters. Try more categories, levels or accuracy ranges.",
+      });
+      return;
+    }
+    // Sound and keyboard can only start during this tap
+    unlockAudio();
     primeKeyboard();
-    setPracticeStarted(true);
+    setSession(buildSession(matching));
   };
+
+  const closeSession = () => {
+    setSession(null);
+    refreshProgress(); // so counts on this screen include the round just played
+  };
+
+  const restartSession = async () => {
+    unlockAudio();
+    primeKeyboard();
+    const map = await refreshProgress();
+    const list = filterWords(map);
+    if (list.length === 0) {
+      releaseKeyboardPrimer();
+      setSession(null);
+      setNotice({
+        type: "info",
+        title: "No words left",
+        message: "No words match these filters any more. Try changing them.",
+      });
+      return;
+    }
+    setSession(buildSession(list));
+  };
+
+  const toggleIn = (set, setter, value) => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setter(next);
+  };
+  const toggleAllCategories = () =>
+    setSelectedCategories(selectedCategories.size === categories.length ? new Set() : new Set(categories));
+  const toggleAllDifficulties = () =>
+    setSelectedDifficulties(selectedDifficulties.size === 10 ? new Set() : new Set(ALL_DIFFICULTIES));
+  const toggleAllAccuracy = () =>
+    setSelectedAccuracy(selectedAccuracy.size === ACCURACY_BUCKETS.length ? new Set() : new Set(ALL_BUCKET_IDS));
 
   const chip = (active) => ({ ...styles.chip, ...(active ? styles.chipActive : {}) });
 
   if (loading) {
     return (
-      <div style={styles.loadingContainer}>
-        <h1 style={styles.loadingText}>Loading...</h1>
+      <div style={styles.shell}>
+        <PracticeHeader title="📚 Practice" backLabel="← Menu" onBack={goBack} />
+        <div style={styles.centerState}>
+          <h1 style={styles.loadingText}>Loading...</h1>
+        </div>
       </div>
     );
   }
 
-  if (practiceStarted) {
+  if (loadError) {
+    return (
+      <div style={styles.shell}>
+        <PracticeHeader title="📚 Practice" backLabel="← Menu" onBack={goBack} />
+        <div style={styles.centerState}>
+          <div style={{ fontSize: 44 }}>⚠️</div>
+          <p style={{ margin: "8px 0 16px", color: "#fde68a", maxWidth: 320, overflowWrap: "anywhere" }}>{loadError}</p>
+          <button style={styles.primaryButton} onClick={() => setReloadKey((k) => k + 1)}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (session) {
     return (
       <PracticeGame
-        categories={selectedCategories}
-        difficulties={selectedDifficulties}
-        goBack={() => setPracticeStarted(false)}
-        goBackMenu={goBack}
+        key={session.id}
+        words={session.words}
+        userId={userId}
+        initialKnown={new Set(progress.keys())}
+        onBack={closeSession}
+        onMenu={goBack}
+        onRestart={restartSession}
       />
     );
   }
 
-  const ready = selectedCategories.length > 0 && selectedDifficulties.length > 0;
+  const needsPick = selectedCategories.size === 0 || selectedDifficulties.size === 0;
+  const roundCount = roundSize > 0 ? Math.min(roundSize, matching.length) : matching.length;
 
   return (
-    <>
-      <div style={styles.selectionContainer}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>📚 Practice</h1>
-          <button
-            onClick={goBack}
-            style={styles.backButton}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#0891b2";
-              e.currentTarget.style.transform = "scale(1.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#06b6d4";
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            ← Menu
-          </button>
-        </div>
+    <div style={styles.shell}>
+      <style>{KEYFRAMES}</style>
+      <PracticeHeader title="📚 Practice" backLabel="← Menu" onBack={goBack} />
 
+      <div style={styles.scrollArea}>
         <div style={styles.selectionBody}>
           <p style={styles.selectionSubtitle}>
             Pick what you want to practise. Your progress is saved.
@@ -201,7 +573,7 @@ function Practice({ goBack }) {
             <div style={styles.sectionHeader}>
               <h2 style={styles.sectionTitle}>Categories</h2>
               <button onClick={toggleAllCategories} style={styles.selectAllButton}>
-                {selectedCategories.length === categories.length ? "Deselect all" : "Select all"}
+                {selectedCategories.size === categories.length ? "Deselect all" : "Select all"}
               </button>
             </div>
             {categories.length === 0 ? (
@@ -209,11 +581,11 @@ function Practice({ goBack }) {
             ) : (
               <div style={styles.grid2Col}>
                 {categories.map((category) => (
-                  <label key={category} style={chip(selectedCategories.includes(category))}>
+                  <label key={category} style={chip(selectedCategories.has(category))}>
                     <input
                       type="checkbox"
-                      checked={selectedCategories.includes(category)}
-                      onChange={() => toggleCategory(category)}
+                      checked={selectedCategories.has(category)}
+                      onChange={() => toggleIn(selectedCategories, setSelectedCategories, category)}
                       style={styles.checkbox}
                     />
                     {category}
@@ -227,92 +599,170 @@ function Practice({ goBack }) {
             <div style={styles.sectionHeader}>
               <h2 style={styles.sectionTitle}>Difficulty (1-10)</h2>
               <button onClick={toggleAllDifficulties} style={styles.selectAllButton}>
-                {selectedDifficulties.length === difficulties.length ? "Deselect all" : "Select all"}
+                {selectedDifficulties.size === 10 ? "Deselect all" : "Select all"}
               </button>
             </div>
             <div style={styles.grid5Col}>
-              {difficulties.map((difficulty) => (
-                <label
-                  key={difficulty}
-                  style={{ ...chip(selectedDifficulties.includes(difficulty)), justifyContent: "center" }}
-                >
+              {ALL_DIFFICULTIES.map((level) => (
+                <label key={level} style={{ ...chip(selectedDifficulties.has(level)), justifyContent: "center" }}>
                   <input
                     type="checkbox"
-                    checked={selectedDifficulties.includes(difficulty)}
-                    onChange={() => toggleDifficulty(difficulty)}
+                    checked={selectedDifficulties.has(level)}
+                    onChange={() => toggleIn(selectedDifficulties, setSelectedDifficulties, level)}
                     style={styles.checkbox}
                   />
-                  {difficulty}
+                  {level}
                 </label>
               ))}
             </div>
           </section>
 
+          <section style={styles.card}>
+            <div style={styles.sectionHeader}>
+              <h2 style={styles.sectionTitle}>Accuracy</h2>
+              <button onClick={toggleAllAccuracy} style={styles.selectAllButton}>
+                {selectedAccuracy.size === ACCURACY_BUCKETS.length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div style={styles.grid3Col}>
+              {ACCURACY_BUCKETS.map((b) => (
+                <label key={b.id} style={{ ...chip(selectedAccuracy.has(b.id)), justifyContent: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedAccuracy.has(b.id)}
+                    onChange={() => toggleIn(selectedAccuracy, setSelectedAccuracy, b.id)}
+                    style={styles.checkbox}
+                  />
+                  {b.label}
+                </label>
+              ))}
+            </div>
+            <p style={styles.hintText}>Words you have not seen yet count as 0%.</p>
+          </section>
+
+          <section style={styles.card}>
+            <h2 style={{ ...styles.sectionTitle, marginBottom: 12 }}>Word status</h2>
+            <div style={styles.segmented4}>
+              {STATUS_OPTIONS.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setStatusFilter(value)}
+                  style={{ ...styles.segment, ...(statusFilter === value ? styles.segmentActive : {}) }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p style={styles.hintText}>
+              New = never answered · Learning = seen, not mastered yet · Mastered = 10 correct answers.
+            </p>
+          </section>
+
+          <section style={styles.card}>
+            <h2 style={{ ...styles.sectionTitle, marginBottom: 12 }}>Round</h2>
+            <label style={{ ...chip(shuffle), justifyContent: "center" }}>
+              <input
+                type="checkbox"
+                checked={shuffle}
+                onChange={(e) => setShuffle(e.target.checked)}
+                style={styles.checkbox}
+              />
+              🔀 Shuffle order
+            </label>
+            <p style={styles.hintText}>
+              {shuffle ? "Words come in a random order." : "Your weakest words come first."}
+            </p>
+            <h3 style={styles.subTitle}>Words per round</h3>
+            <div style={styles.segmented4}>
+              {ROUND_SIZES.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setRoundSize(value)}
+                  style={{ ...styles.segment, ...(roundSize === value ? styles.segmentActive : {}) }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div style={styles.footerBar}>
+        <div style={styles.footerInner}>
+          <p style={styles.matchText}>
+            {needsPick
+              ? "Pick a category and a difficulty to begin"
+              : `${matching.length.toLocaleString()} ${matching.length === 1 ? "word matches" : "words match"}`}
+          </p>
           <button
-            onClick={handleStartPractice}
-            style={{ ...styles.primaryButton, opacity: ready ? 1 : 0.6 }}
+            onClick={handleStart}
+            style={{ ...styles.primaryButton, opacity: !needsPick && matching.length > 0 ? 1 : 0.6 }}
           >
-            Start practice →
-          </button>
-          <button onClick={goBack} style={styles.secondaryButton}>
-            ← Back to menu
+            {!needsPick && matching.length > 0
+              ? `Start practice (${roundCount} ${roundCount === 1 ? "word" : "words"}) →`
+              : "Start practice →"}
           </button>
         </div>
       </div>
+
       <NoticeModal notice={notice} onClose={() => setNotice(null)} />
-    </>
+    </div>
   );
 }
 
 // ============================================================================
 // GAME SCREEN
 // ============================================================================
-function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
-  const [words, setWords] = useState([]);
+function PracticeGame({ words, userId, initialKnown, onBack, onMenu, onRestart }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answer, setAnswer] = useState("");
-  const [result, setResult] = useState(null); // null | { correct: boolean }
-  const [loading, setLoading] = useState(true);
-  const [practiceStats, setPracticeStats] = useState({ correct: 0, total: 0 });
-  const [gameOver, setGameOver] = useState(false);
-  const [userId, setUserId] = useState(null);
   const [locked, setLocked] = useState(false);
-  const [card, setCard] = useState(null); // pop-up after a wrong answer / mastered word
-  const [notice, setNotice] = useState(null);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const answerLockedRef = useRef(false);
   const inputRef = useRef(null);
 
-  useEffect(() => {
-    const fetchWords = async () => {
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        setUserId(userData.user?.id);
+  const [card, setCard] = useState(null); // wrong / mastered pop-up
+  const [correctCard, setCorrectCard] = useState(null);
+  const pendingNextRef = useRef(null);
+  const correctTimerRef = useRef(null);
+  const masteredTimerRef = useRef(null);
 
-        let query = supabase.from("words").select("*");
-        if (categories.length > 0) query = query.in("category", categories);
-        if (difficulties.length > 0) query = query.in("difficulty", difficulties);
+  const [streak, setStreak] = useState(0); // used for praise text and the 🔥 chip
+  const [stats, setStats] = useState({ correct: 0, total: 0 });
+  const [results, setResults] = useState([]);
+  const [finished, setFinished] = useState(false);
 
-        const { data, error } = await query.limit(20);
-        if (error) throw error;
+  // New words, mastered words, milestones
+  const [newWordCard, setNewWordCard] = useState(null);
+  const [newWords, setNewWords] = useState([]);
+  const [masteredWords, setMasteredWords] = useState([]);
+  const knownWordIdsRef = useRef(new Set(initialKnown));
+  const celebratedRef = useRef(new Set());
+  const [milestonesReached, setMilestonesReached] = useState([]);
+  const [milestoneCard, setMilestoneCard] = useState(null);
+  const milestoneShownRef = useRef(new Set());
 
-        setWords(data.sort(() => Math.random() - 0.5));
-      } catch (error) {
-        console.error("Error fetching practice words:", error);
-        releaseKeyboardPrimer();
-        setNotice({
-          type: "error",
-          title: "Couldn't load words",
-          message: "Please check your connection and try again.",
-          onClose: goBackMenu,
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+  const [mistakeError, setMistakeError] = useState("");
+  const [saveError, setSaveError] = useState("");
 
-    fetchWords();
-  }, []);
+  // Report an issue with a word
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [reportNotes, setReportNotes] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const [notice, setNotice] = useState(null);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  useEffect(
+    () => () => {
+      clearTimeout(correctTimerRef.current);
+      clearTimeout(masteredTimerRef.current);
+    },
+    []
+  );
 
   // iPhone: detect when the keyboard is open so the top area can shrink
   useEffect(() => {
@@ -326,105 +776,187 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
 
   // Keep the keyboard open: cursor goes straight into the answer bar
   useEffect(() => {
-    if (loading || gameOver) return;
-    const el = inputRef.current;
-    if (el) el.focus();
+    if (finished) return;
+    inputRef.current?.focus();
     releaseKeyboardPrimer();
-  }, [loading, gameOver, currentIndex, words.length]);
+  }, [currentIndex, finished]);
+
+  const currentWord = words[currentIndex];
+
+  // New word detection: a word with no row in user_progress has never been seen
+  useEffect(() => {
+    if (finished || !currentWord) return;
+    if (card || correctCard) return;
+    // A milestone pop-up goes first
+    if (milestoneCard || milestonesReached.some((m) => !milestoneShownRef.current.has(m))) return;
+    if (celebratedRef.current.has(currentWord.id) || knownWordIdsRef.current.has(currentWord.id)) return;
+    celebratedRef.current.add(currentWord.id);
+    setNewWords((list) => [...list, { id: currentWord.id, english: currentWord.english, dutch: currentWord.dutch }]);
+    setNewWordCard({ english: currentWord.english });
+    playSound("newword");
+    buzz([40, 50, 90]);
+  }, [finished, currentWord, card, correctCard, milestoneCard, milestonesReached]);
+
+  // Show a milestone pop-up as soon as no other pop-up is open
+  useEffect(() => {
+    if (milestoneCard || finished) return;
+    if (card || correctCard || newWordCard) return;
+    const next = milestonesReached.find((m) => !milestoneShownRef.current.has(m));
+    if (!next) return;
+    milestoneShownRef.current.add(next);
+    setMilestoneCard(next);
+    playSound("milestone");
+    buzz([60, 40, 60, 40, 140]);
+  }, [milestonesReached, milestoneCard, finished, card, correctCard, newWordCard]);
+
+  // Sound when the round ends well
+  useEffect(() => {
+    if (!finished || stats.total === 0) return;
+    if (stats.correct / stats.total >= 0.6) playSound("celebrate");
+  }, [finished]);
 
   // ---------- progress ----------
-  const updateUserProgress = async (wordId, isCorrect) => {
-    if (!userId) return { newlyMastered: false };
+  const saveAttempt = async (word, isCorrect, typedAnswer) => {
+    const fallback = { newlyMastered: false };
+    if (!userId) return fallback;
 
     try {
       const { data: existing, error: fetchError } = await supabase
         .from("user_progress")
-        .select("*")
+        .select("id, correct_count, incorrect_count, mastered")
         .eq("user_id", userId)
-        .eq("word_id", wordId)
-        .single();
+        .eq("word_id", word.id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
 
-      if (fetchError && fetchError.code !== "PGRST116") {
-        console.error("Fetch error:", fetchError);
-        return { newlyMastered: false };
-      }
+      let newlyMastered = false;
 
       if (existing) {
-        const newCorrectCount = isCorrect ? existing.correct_count + 1 : existing.correct_count;
-        const newIncorrectCount = !isCorrect ? existing.incorrect_count + 1 : existing.incorrect_count;
-        const isMastered = newCorrectCount >= 10;
-
-        await supabase
+        const correctCount = Number(existing.correct_count || 0) + (isCorrect ? 1 : 0);
+        const incorrectCount = Number(existing.incorrect_count || 0) + (isCorrect ? 0 : 1);
+        const isMastered = correctCount >= 10;
+        newlyMastered = isCorrect && isMastered && !existing.mastered;
+        const { error: updateError } = await supabase
           .from("user_progress")
           .update({
-            correct_count: newCorrectCount,
-            incorrect_count: newIncorrectCount,
+            correct_count: correctCount,
+            incorrect_count: incorrectCount,
             mastered: isMastered,
-            last_seen_at: new Date(),
+            last_seen_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
-
-        return { newlyMastered: isMastered && !existing.mastered };
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase.from("user_progress").insert({
+          user_id: userId,
+          word_id: word.id,
+          correct_count: isCorrect ? 1 : 0,
+          incorrect_count: isCorrect ? 0 : 1,
+          mastered: false,
+          last_seen_at: new Date().toISOString(),
+        });
+        if (insertError) throw insertError;
       }
 
-      await supabase.from("user_progress").insert([
-        {
+      // Count words discovered; announce milestones (50, 100, 250, ...)
+      const sizeBefore = knownWordIdsRef.current.size;
+      knownWordIdsRef.current.add(word.id);
+      const sizeAfter = knownWordIdsRef.current.size;
+      if (sizeAfter > sizeBefore && isMilestone(sizeAfter)) {
+        setMilestonesReached((list) => [...list, sizeAfter]);
+      }
+
+      // History of wrong answers (shown in Your Words and used by the Review hint)
+      if (!isCorrect) {
+        const { error: mistakeInsertError } = await supabase.from("word_mistakes").insert({
           user_id: userId,
-          word_id: wordId,
-          correct_count: isCorrect ? 1 : 0,
-          incorrect_count: !isCorrect ? 1 : 0,
-          mastered: false,
-          last_seen_at: new Date(),
-        },
-      ]);
+          word_id: word.id,
+          user_answer: typedAnswer || "",
+          correct_answer: word.dutch || "",
+          level: null,
+          mode: "practice",
+        });
+        if (mistakeInsertError) {
+          console.error("Could not save mistake:", mistakeInsertError);
+          setMistakeError(mistakeInsertError.message || "Unknown error");
+        } else {
+          setMistakeError("");
+        }
+      }
+
+      setSaveError("");
+      return { newlyMastered };
     } catch (error) {
       console.error("Error updating progress:", error);
+      setSaveError(error?.message || "Unknown database error");
+      return fallback;
     }
-    return { newlyMastered: false };
   };
 
-  const normalize = (str) =>
-    str
-      .toLowerCase()
-      .trim()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^\w\s]/g, "")
-      .replace(/ï/g, "i")
-      .replace(/ü/g, "u")
-      .replace(/ö/g, "o")
-      .replace(/\s+/g, " ");
+  // ---------- flow ----------
+  const isLastWord = currentIndex >= words.length - 1;
 
-  // Move on to the next word (or finish)
   const advance = () => {
     setCard(null);
-    setResult(null);
+    setCorrectCard(null);
+    setReportOpen(false);
+    setReportText("");
+    setReportNotes("");
     setAnswer("");
-    if (currentIndex >= words.length - 1) {
-      setGameOver(true);
+    if (isLastWord) {
+      setFinished(true);
       return;
     }
-    setCurrentIndex(currentIndex + 1);
+    setCurrentIndex((i) => i + 1);
     answerLockedRef.current = false;
     setLocked(false);
   };
 
+  const finishCorrectCard = () => {
+    clearTimeout(correctTimerRef.current);
+    const next = pendingNextRef.current;
+    pendingNextRef.current = null;
+    if (!next) return;
+    setCorrectCard(null);
+    inputRef.current?.focus(); // inside the tap, so the iPhone keyboard stays open
+    next();
+  };
+
+  const showCorrectCard = (data, next) => {
+    setCorrectCard(data);
+    pendingNextRef.current = next;
+    clearTimeout(correctTimerRef.current);
+    correctTimerRef.current = setTimeout(finishCorrectCard, CORRECT_CARD_MS);
+  };
+
   const continueFromCard = () => {
-    // Focus inside the tap, so the keyboard comes straight back on iPhone
-    if (currentIndex < words.length - 1) inputRef.current?.focus();
+    if (!isLastWord) inputRef.current?.focus();
     advance();
+  };
+
+  const closeNewWordCard = () => {
+    playSound("pop");
+    setNewWordCard(null);
+    inputRef.current?.focus();
+  };
+
+  const closeMilestoneCard = () => {
+    playSound("pop");
+    setMilestoneCard(null);
+    inputRef.current?.focus();
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (answerLockedRef.current || gameOver || loading) return;
+    if (answerLockedRef.current || finished || !currentWord || newWordCard || milestoneCard) return;
     answerLockedRef.current = true;
     setLocked(true);
 
-    const currentWord = words[currentIndex];
+    const word = currentWord;
+    const typed = answer.trim();
     const userAnswer = answer.toLowerCase().trim();
 
-    const correctFull = currentWord.dutch.toLowerCase().trim();
+    const correctFull = word.dutch.toLowerCase().trim();
     const correctBase = correctFull
       .split(",")[0]
       .replace(/^(de |het |een |het )/, "")
@@ -437,114 +969,177 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
       normalizedAnswer === normalize(`de ${correctBase}`) ||
       normalizedAnswer === normalize(`het ${correctBase}`);
 
-    const saved = await updateUserProgress(currentWord.id, isCorrect);
+    playSound(isCorrect ? "correct" : "wrong");
+    buzz(isCorrect ? 30 : [80, 40, 120]);
 
-    setResult({ correct: isCorrect });
-    setPracticeStats((prev) => ({
-      correct: prev.correct + (isCorrect ? 1 : 0),
-      total: prev.total + 1,
-    }));
+    const newStreak = isCorrect ? streak + 1 : 0;
+    setStreak(newStreak);
+    setStats((s) => ({ correct: s.correct + (isCorrect ? 1 : 0), total: s.total + 1 }));
+    setResults((list) => [...list, { wordId: word.id, english: word.english, dutch: word.dutch, correct: isCorrect }]);
     setAnswer("");
+
+    const saved = await saveAttempt(word, isCorrect, typed);
 
     if (!isCorrect) {
       // Wrong answers wait until the player has read the correction
-      setCard({
-        kind: "wrong",
-        english: currentWord.english,
-        dutch: currentWord.dutch,
-        userAnswer: answer.trim(),
-      });
-    } else if (saved?.newlyMastered) {
-      setTimeout(() => {
-        setCard({ kind: "mastered", english: currentWord.english, dutch: currentWord.dutch });
+      setCard({ kind: "wrong", wordId: word.id, english: word.english, dutch: word.dutch, userAnswer: typed });
+    } else if (saved.newlyMastered) {
+      masteredTimerRef.current = setTimeout(() => {
+        playSound("celebrate");
+        setMasteredWords((list) => [...list, { id: word.id, english: word.english, dutch: word.dutch }]);
+        setCard({ kind: "mastered", wordId: word.id, english: word.english, dutch: word.dutch });
       }, 700);
     } else {
-      setTimeout(advance, 2000);
+      showCorrectCard({ praise: pickPraise(newStreak), english: word.english, dutch: word.dutch }, advance);
     }
   };
 
-  // ---------- screens ----------
-  if (loading) {
+  // ---------- report an issue ----------
+  const submitErrorReport = async () => {
+    if (!reportText.trim() || !userId || !card) return;
+    setReportLoading(true);
+    try {
+      const { error } = await supabase.from("word_issues").insert([
+        {
+          word_id: card.wordId,
+          user_id: userId,
+          english: card.english,
+          dutch: card.dutch,
+          user_answer: card.userAnswer || "",
+          suggested_correction: reportText.trim(),
+          feedback_text: reportNotes.trim(),
+          resolved: false,
+        },
+      ]);
+      if (error) throw error;
+      setReportText("");
+      setReportNotes("");
+      setReportOpen(false);
+      setNotice({
+        type: "success",
+        title: "Report sent",
+        message: "Thanks for helping us improve the word list. We'll look into it soon.",
+      });
+    } catch (error) {
+      console.error("Error submitting report:", error);
+      setNotice({
+        type: "error",
+        title: "Couldn't send report",
+        message: "Something went wrong while sending your report. Please try again.",
+      });
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const closeNotice = () => {
+    const callback = notice?.onClose;
+    setNotice(null);
+    if (callback) callback();
+  };
+
+  // ---------- finished ----------
+  if (finished) {
+    const pct = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+    const missed = [];
+    const seenMissed = new Set();
+    results.forEach((r) => {
+      if (!r.correct && !seenMissed.has(r.wordId)) {
+        seenMissed.add(r.wordId);
+        missed.push(r);
+      }
+    });
+
     return (
       <>
-        <div style={styles.loadingContainer}>
-          <h1 style={styles.loadingText}>Loading...</h1>
+        <div style={styles.finishContainer}>
+          <style>{KEYFRAMES}</style>
+          {pct >= 60 && <Confetti />}
+          <div style={{ fontSize: 64, textAlign: "center", animation: "pPop 0.7s ease-out" }}>📚</div>
+          <h1 style={styles.finishTitle}>Practice complete!</h1>
+
+          <div style={styles.statsGrid}>
+            <div style={styles.statCard}>
+              <p style={styles.statValue}>{stats.correct}/{stats.total}</p>
+              <p style={styles.statLabel}>Correct</p>
+            </div>
+            <div style={styles.statCard}>
+              <p style={styles.statValue}>{pct}%</p>
+              <p style={styles.statLabel}>Accuracy</p>
+            </div>
+            <div style={styles.statCard}>
+              <p style={styles.statValue}>✨ {newWords.length}</p>
+              <p style={styles.statLabel}>New words</p>
+            </div>
+            <div style={styles.statCard}>
+              <p style={styles.statValue}>🏅 {masteredWords.length}</p>
+              <p style={styles.statLabel}>Mastered</p>
+            </div>
+          </div>
+
+          {milestonesReached.length > 0 && (
+            <p style={{ ...styles.saveStatus, color: "#fcd34d" }}>
+              🏆 Milestone reached: {milestonesReached.map((m) => `${m.toLocaleString()} words`).join(" · ")}
+            </p>
+          )}
+          {saveError && (
+            <p role="alert" style={{ ...styles.saveStatus, color: "#fde68a" }}>
+              ⚠️ Some answers could not be saved: {saveError}
+            </p>
+          )}
+
+          <div style={styles.buttonContainer}>
+            <button onClick={onRestart} style={styles.primaryButton}>Practise again</button>
+            <button onClick={onBack} style={styles.secondaryButton}>Change filters</button>
+            <button onClick={onMenu} style={styles.secondaryButton}>← Menu</button>
+          </div>
+
+          {newWords.length > 0 && (
+            <div style={{ ...styles.listSection, border: "1px solid rgba(251,191,36,0.35)" }}>
+              <h2 style={{ ...styles.listTitle, color: "#fcd34d" }}>✨ New words</h2>
+              <div style={styles.listRows}>
+                {newWords.slice(0, 12).map((item) => (
+                  <div key={item.id} style={styles.listRow}>
+                    <span style={styles.listEnglish}>{item.english}</span>
+                    <span style={styles.listDutch}>{item.dutch}</span>
+                  </div>
+                ))}
+                {newWords.length > 12 && (
+                  <p style={{ ...styles.listDutch, textAlign: "center", margin: 0 }}>
+                    + {newWords.length - 12} more in Your Words
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {missed.length > 0 && (
+            <div style={styles.listSection}>
+              <h2 style={styles.listTitle}>📝 Missed words</h2>
+              <div style={styles.listRows}>
+                {missed.slice(0, 10).map((item) => (
+                  <div key={item.wordId} style={styles.listRow}>
+                    <span style={styles.listEnglish}>{item.english}</span>
+                    <span style={styles.listDutch}>{item.dutch}</span>
+                  </div>
+                ))}
+                {missed.length > 10 && (
+                  <p style={{ ...styles.listDutch, textAlign: "center", margin: 0 }}>
+                    + {missed.length - 10} more in Your Words
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-        <NoticeModal
-          notice={notice}
-          onClose={() => {
-            const cb = notice?.onClose;
-            setNotice(null);
-            if (cb) cb();
-          }}
-        />
+        <NoticeModal notice={notice} onClose={closeNotice} />
       </>
     );
   }
 
-  if (words.length === 0) {
-    return (
-      <>
-        <div style={styles.loadingContainer}>
-          <div style={{ fontSize: 64 }}>🔍</div>
-          <h1 style={{ ...styles.loadingText, textAlign: "center", marginTop: 8 }}>
-            No words found
-          </h1>
-          <p style={styles.loadingSubtext}>Nothing matches those filters. Try other categories or levels.</p>
-          <button onClick={goBack} style={styles.primaryButton}>
-            Back to selection
-          </button>
-        </div>
-        <NoticeModal
-          notice={notice}
-          onClose={() => {
-            const cb = notice?.onClose;
-            setNotice(null);
-            if (cb) cb();
-          }}
-        />
-      </>
-    );
-  }
+  if (!currentWord) return null;
 
-  if (gameOver) {
-    const percentage =
-      practiceStats.total > 0
-        ? Math.round((practiceStats.correct / practiceStats.total) * 100)
-        : 0;
-
-    return (
-      <div style={styles.gameOverContainer}>
-        <style>{KEYFRAMES}</style>
-        <div style={{ fontSize: 64, textAlign: "center", animation: "pPop 0.7s ease-out" }}>📚</div>
-        <h1 style={styles.gameOverTitle}>Practice complete!</h1>
-        <div style={styles.statsGrid}>
-          <div style={styles.statCard}>
-            <p style={styles.statValue}>{practiceStats.correct}/{practiceStats.total}</p>
-            <p style={styles.statLabel}>Correct</p>
-          </div>
-          <div style={styles.statCard}>
-            <p style={styles.statValue}>{percentage}%</p>
-            <p style={styles.statLabel}>Accuracy</p>
-          </div>
-        </div>
-        <div style={styles.buttonContainer}>
-          <button onClick={goBack} style={styles.primaryButton}>
-            Back to selection
-          </button>
-          <button onClick={goBackMenu} style={styles.secondaryButton}>
-            ← Menu
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const currentWord = words[currentIndex];
-  const accuracy =
-    practiceStats.total > 0
-      ? Math.round((practiceStats.correct / practiceStats.total) * 100)
-      : null;
+  const accuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : null;
 
   return (
     <>
@@ -552,34 +1147,24 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
         <style>{KEYFRAMES}</style>
 
         <div style={styles.stickyTop}>
-          <div style={styles.header}>
-            <h1 style={styles.title}>📚 Practice</h1>
-            <button
-              onClick={goBack}
-              style={styles.backButton}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#0891b2";
-                e.currentTarget.style.transform = "scale(1.05)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "#06b6d4";
-                e.currentTarget.style.transform = "scale(1)";
-              }}
-            >
-              {keyboardOpen ? "←" : "← Menu"}
-            </button>
-          </div>
+          <PracticeHeader
+            title="📚 Practice"
+            backLabel={keyboardOpen ? "←" : "← Back"}
+            onBack={onBack}
+            onPopoverClose={() => inputRef.current?.focus()}
+          />
 
           <div style={keyboardOpen ? styles.hudCompact : styles.hud}>
             <div style={styles.scoreWrap}>
-              <span style={keyboardOpen ? styles.scoreCompact : styles.scoreBig}>
-                {practiceStats.correct}
-              </span>
+              <span style={keyboardOpen ? styles.scoreCompact : styles.scoreBig}>{stats.correct}</span>
               <span style={styles.scoreLabel}>
-                correct{practiceStats.total > 0 ? ` of ${practiceStats.total}` : ""}
+                correct{stats.total > 0 ? ` of ${stats.total}` : ""}
               </span>
             </div>
-            {accuracy !== null && <span style={styles.pillBlue}>🎯 {accuracy}%</span>}
+            <div style={styles.chipRow}>
+              {streak >= 2 && <span style={styles.pillOrange}>🔥 {streak}</span>}
+              {accuracy !== null && <span style={styles.pillBlue}>🎯 {accuracy}%</span>}
+            </div>
           </div>
 
           <div style={styles.progressBar}>
@@ -597,12 +1182,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
             Question {currentIndex + 1}/{words.length}
           </p>
           <h2 style={styles.questionText}>Translate to Dutch:</h2>
-          <h1
-            style={{
-              ...styles.wordToTranslate,
-              ...(keyboardOpen ? { fontSize: "28px" } : {}),
-            }}
-          >
+          <h1 style={{ ...styles.wordToTranslate, ...(keyboardOpen ? { fontSize: "28px" } : {}) }}>
             {currentWord.english}
           </h1>
         </div>
@@ -626,13 +1206,10 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
             type="text"
             value={answer}
             onChange={(e) => {
-              if (!answerLockedRef.current) setAnswer(e.target.value);
+              if (!answerLockedRef.current && !newWordCard && !milestoneCard) setAnswer(e.target.value);
             }}
             placeholder="Type the translation..."
-            style={{
-              ...styles.input,
-              ...(result?.correct ? styles.inputCorrect : {}),
-            }}
+            style={styles.input}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
@@ -642,27 +1219,105 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
           <button
             type="submit"
             style={styles.submitButton}
-            disabled={locked}
+            disabled={locked || !!newWordCard || !!milestoneCard}
             onMouseDown={(e) => e.preventDefault()}
           >
             Submit
           </button>
         </form>
 
-        {result?.correct && !card && (
-          <p style={styles.feedbackCorrect}>✅ Correct!</p>
+        {saveError && (
+          <p role="alert" style={styles.saveWarning}>
+            ⚠️ This answer could not be saved: {saveError}
+          </p>
         )}
+
+        <div style={{ height: 24 }} />
       </div>
 
+      {/* CORRECT */}
+      {correctCard && !card && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={styles.correctOverlay}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={finishCorrectCard}
+        >
+          <div style={styles.correctCard}>
+            <div style={styles.correctBadge}>✓</div>
+            <h2 style={styles.correctTitle}>{correctCard.praise}</h2>
+            <p style={styles.correctWords}>
+              {correctCard.english} → <strong>{correctCard.dutch}</strong>
+            </p>
+            <div style={styles.correctTimerTrack}>
+              <div style={{ ...styles.correctTimerFill, animationDuration: `${CORRECT_CARD_MS}ms` }} />
+            </div>
+            <p style={styles.correctHint}>Tap to continue</p>
+          </div>
+        </div>
+      )}
+
+      {/* NEW WORD */}
+      {newWordCard && !card && (
+        <div role="dialog" aria-modal="true" aria-labelledby="practice-new-title" style={styles.overlay}>
+          <Confetti />
+          <div style={styles.modalCard}>
+            <div style={{ ...styles.bigEmoji }}>
+              <span style={{ display: "inline-block", animation: "pSparkle 1.6s ease-in-out infinite" }}>✨</span>
+            </div>
+            <p style={styles.newWordEyebrow}>NEW WORD DISCOVERED</p>
+            <h2 id="practice-new-title" style={styles.cardTitle}>You haven't met this one yet</h2>
+            <div style={styles.newWordBox}>
+              <span style={styles.newWordLabel}>ENGLISH</span>
+              <strong style={styles.newWordEnglish}>{newWordCard.english}</strong>
+            </div>
+            <p style={styles.cardNote}>Take your best guess. It joins Your Words as soon as you answer.</p>
+            <button type="button" onClick={closeNewWordCard} style={styles.modalPrimaryButton}>
+              Let's try it<span aria-hidden="true"> →</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MILESTONE */}
+      {milestoneCard && !card && (
+        <div role="dialog" aria-modal="true" aria-labelledby="practice-milestone-title" style={styles.overlay}>
+          <Confetti />
+          <div
+            style={{
+              ...styles.modalCard,
+              border: "1px solid rgba(251,191,36,0.6)",
+              boxShadow: "0 24px 70px rgba(0,0,0,0.5), 0 0 50px rgba(251,191,36,0.25)",
+            }}
+          >
+            <div style={styles.bigEmoji}>{milestoneIcon(milestoneCard)}</div>
+            <p style={styles.newWordEyebrow}>MILESTONE REACHED</p>
+            <h2 id="practice-milestone-title" style={styles.cardTitle}>
+              {milestoneCard.toLocaleString()} words discovered!
+            </h2>
+            <div style={styles.newWordBox}>
+              <strong style={styles.newWordEnglish}>{milestoneCard.toLocaleString()}</strong>
+              <span style={styles.newWordLabel}>WORDS IN YOUR WORDS</span>
+            </div>
+            <p style={styles.cardNote}>{milestoneText(milestoneCard)}</p>
+            <button type="button" onClick={closeMilestoneCard} style={styles.modalPrimaryButton}>
+              Keep going<span aria-hidden="true"> →</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* WRONG / MASTERED / REPORT */}
       {card && (
         <div role="dialog" aria-modal="true" aria-labelledby="practice-card-title" style={styles.overlay}>
           {card.kind === "mastered" ? (
             <>
               <Confetti />
               <div style={styles.modalCard}>
-                <div style={{ ...styles.bigEmoji, textAlign: "center" }}>🏅</div>
+                <div style={styles.bigEmoji}>🏅</div>
                 <p style={styles.masteredEyebrow}>WORD MASTERED</p>
-                <h2 id="practice-card-title" style={styles.modalTitle}>You know this one!</h2>
+                <h2 id="practice-card-title" style={styles.cardTitle}>You know this one!</h2>
                 <p style={styles.cardEnglish}>{card.english}</p>
                 <div style={styles.correctAnswerBox}>
                   <span style={styles.correctAnswerLabel}>DUTCH</span>
@@ -670,12 +1325,12 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
                 </div>
                 <p style={styles.cardNote}>10 correct answers. It now counts as a mastered word.</p>
                 <button type="button" onClick={continueFromCard} style={styles.modalPrimaryButton}>
-                  {currentIndex >= words.length - 1 ? "See results" : "Keep going"}
+                  {isLastWord ? "See results" : "Keep going"}
                   <span aria-hidden="true"> →</span>
                 </button>
               </div>
             </>
-          ) : (
+          ) : !reportOpen ? (
             <div style={styles.modalCard}>
               <div
                 style={{
@@ -688,7 +1343,7 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
                 ✕
               </div>
               <p style={styles.wrongEyebrow}>NOT QUITE</p>
-              <h2 id="practice-card-title" style={styles.modalTitle}>Learn from this one</h2>
+              <h2 id="practice-card-title" style={styles.cardTitle}>Learn from this one</h2>
               <p style={styles.cardEnglish}>{card.english}</p>
               <div style={styles.correctAnswerBox}>
                 <span style={styles.correctAnswerLabel}>CORRECT ANSWER</span>
@@ -703,29 +1358,116 @@ function PracticeGame({ categories, difficulties, goBack, goBackMenu }) {
                   "No answer entered"
                 )}
               </p>
+              {mistakeError && (
+                <p role="alert" style={styles.mistakeWarning}>
+                  ⚠️ This mistake could not be saved to your history: {mistakeError}
+                </p>
+              )}
               <button type="button" onClick={continueFromCard} style={styles.modalPrimaryButton}>
-                {currentIndex >= words.length - 1 ? "See results" : "Next question"}
+                {isLastWord ? "See results" : "Next question"}
                 <span aria-hidden="true"> →</span>
               </button>
+              <button type="button" onClick={() => setReportOpen(true)} style={styles.reportLinkButton}>
+                ⚑ Report issue with this word
+              </button>
+            </div>
+          ) : (
+            <div style={{ ...styles.modalCard, textAlign: "left" }}>
+              <h2 id="practice-card-title" style={styles.reportTitle}>Report a word issue</h2>
+              <p style={styles.reportWord}>
+                <strong>{card.english}</strong> → {card.dutch}
+              </p>
+
+              <label style={styles.formLabel} htmlFor="practice-report-correction">
+                What should the correct translation be?
+              </label>
+              <input
+                id="practice-report-correction"
+                type="text"
+                value={reportText}
+                onChange={(e) => setReportText(e.target.value)}
+                placeholder="Type the correct translation..."
+                style={styles.reportInput}
+              />
+
+              <label style={{ ...styles.formLabel, marginTop: 12 }} htmlFor="practice-report-notes">
+                Extra notes (optional)
+              </label>
+              <textarea
+                id="practice-report-notes"
+                value={reportNotes}
+                onChange={(e) => setReportNotes(e.target.value)}
+                placeholder="Add any extra context..."
+                maxLength={1000}
+                rows={3}
+                style={styles.reportTextarea}
+              />
+
+              <div style={styles.reportActions}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportOpen(false);
+                    setReportText("");
+                    setReportNotes("");
+                  }}
+                  style={styles.reportCancelButton}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={submitErrorReport}
+                  disabled={reportLoading || !reportText.trim()}
+                  style={{
+                    ...styles.reportSubmitButton,
+                    opacity: reportLoading || !reportText.trim() ? 0.6 : 1,
+                    cursor: reportLoading || !reportText.trim() ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {reportLoading ? "Sending..." : "Send report"}
+                </button>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      <NoticeModal
-        notice={notice}
-        onClose={() => {
-          const cb = notice?.onClose;
-          setNotice(null);
-          if (cb) cb();
-        }}
-      />
+      <NoticeModal notice={notice} onClose={closeNotice} />
     </>
   );
 }
 
 const styles = {
-  // ---------- Shell (same as Play) ----------
+  // ---------- Shells ----------
+  // Selection screen: header and footer stay put, only the middle scrolls
+  shell: {
+    position: "fixed",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+    fontFamily: FONT,
+    overflow: "hidden",
+  },
+  scrollArea: {
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
+    overscrollBehavior: "contain",
+  },
+  centerState: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    padding: "40px 20px",
+  },
+  // Game screen (same as Play / Review)
   container: {
     position: "fixed",
     top: 0,
@@ -741,32 +1483,28 @@ const styles = {
     display: "flex",
     flexDirection: "column",
   },
-  selectionContainer: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-    fontFamily: FONT,
-    display: "flex",
-    flexDirection: "column",
-  },
   stickyTop: {
     position: "sticky",
     top: 0,
     zIndex: 100,
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
   },
+
+  // ---------- Header (same as Play / Review) ----------
   header: {
-    position: "sticky",
-    top: 0,
+    position: "relative",
     zIndex: 100,
+    flex: "0 0 auto",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "12px 16px",
+    padding: "max(12px, env(safe-area-inset-top)) 16px 12px",
     borderBottom: "1px solid rgba(6,182,212,0.2)",
     gap: "8px",
   },
+  headerRight: { display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 },
   title: {
     fontSize: "clamp(18px, 5vw, 24px)",
     fontWeight: "800",
@@ -789,6 +1527,34 @@ const styles = {
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
+  audioButton: {
+    padding: "6px 9px", fontSize: "16px", lineHeight: 1, background: "rgba(255,255,255,0.1)", color: "white",
+    border: "1px solid rgba(6,182,212,0.4)", borderRadius: "6px", cursor: "pointer", flexShrink: 0,
+  },
+  audioBackdrop: { position: "fixed", inset: 0, zIndex: 1, background: "transparent" },
+  audioPopover: {
+    position: "absolute", top: "calc(100% + 6px)", right: "12px", zIndex: 2, width: "min(300px, calc(100vw - 24px))",
+    boxSizing: "border-box", padding: "14px", borderRadius: "14px", color: "#f8fafc",
+    background: "linear-gradient(160deg, #1e293b 0%, #172554 100%)", border: "1px solid rgba(148,163,184,0.35)",
+    boxShadow: "0 18px 50px rgba(0,0,0,0.5)",
+  },
+  audioRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" },
+  audioLabel: { fontSize: "14px", fontWeight: 700, color: "#e2e8f0" },
+  audioToggle: (on) => ({
+    position: "relative", width: "46px", height: "26px", borderRadius: "13px", border: "none", cursor: "pointer",
+    background: on ? "#06b6d4" : "#64748b", transition: "background 0.2s ease", flexShrink: 0, padding: 0,
+  }),
+  audioKnob: (on) => ({
+    position: "absolute", top: "3px", left: on ? "23px" : "3px", width: "20px", height: "20px", borderRadius: "50%",
+    background: "white", transition: "left 0.2s ease",
+  }),
+  audioSliderRow: { display: "flex", alignItems: "center", gap: "10px", marginTop: "6px" },
+  audioRange: { flex: 1, minWidth: 0, height: "32px", accentColor: "#06b6d4", touchAction: "pan-y", cursor: "pointer" },
+  audioValue: { width: "42px", textAlign: "right", fontSize: "13px", color: "#fff", fontVariantNumeric: "tabular-nums" },
+  audioDone: {
+    width: "100%", marginTop: "12px", padding: "10px", borderRadius: "10px", border: "none", cursor: "pointer",
+    fontWeight: 700, fontFamily: "inherit", color: "#0f172a", background: "#06b6d4",
+  },
 
   // ---------- Selection ----------
   selectionBody: {
@@ -801,12 +1567,7 @@ const styles = {
     flexDirection: "column",
     gap: "14px",
   },
-  selectionSubtitle: {
-    fontSize: "14px",
-    color: "#bfdbfe",
-    textAlign: "center",
-    margin: "0",
-  },
+  selectionSubtitle: { fontSize: "14px", color: "#bfdbfe", textAlign: "center", margin: "0" },
   card: {
     background: "rgba(30, 58, 138, 0.8)",
     border: "1px solid rgba(6,182,212,0.3)",
@@ -820,12 +1581,9 @@ const styles = {
     gap: "12px",
     marginBottom: "12px",
   },
-  sectionTitle: {
-    fontSize: "16px",
-    fontWeight: "700",
-    color: "#67e8f9",
-    margin: "0",
-  },
+  sectionTitle: { fontSize: "16px", fontWeight: "700", color: "#67e8f9", margin: "0" },
+  subTitle: { fontSize: "13px", fontWeight: "700", color: "#67e8f9", margin: "16px 0 8px" },
+  hintText: { margin: "10px 0 0", fontSize: "12px", color: "#93c5fd", lineHeight: 1.4 },
   selectAllButton: {
     padding: "5px 10px",
     fontSize: "12px",
@@ -838,6 +1596,7 @@ const styles = {
     whiteSpace: "nowrap",
   },
   grid2Col: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" },
+  grid3Col: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" },
   grid5Col: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" },
   chip: {
     display: "flex",
@@ -853,19 +1612,42 @@ const styles = {
     userSelect: "none",
     transition: "all 0.2s ease",
   },
-  chipActive: {
-    background: "rgba(6,182,212,0.15)",
-    borderColor: "#06b6d4",
+  chipActive: { background: "rgba(6,182,212,0.15)", borderColor: "#06b6d4", color: "white" },
+  checkbox: { width: "14px", height: "14px", cursor: "pointer", accentColor: "#06b6d4", flexShrink: 0 },
+  segmented4: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" },
+  segment: {
+    padding: "10px 4px",
+    fontSize: "12px",
+    fontWeight: "600",
+    fontFamily: "inherit",
+    color: "#bfdbfe",
+    background: "rgba(30, 58, 138, 0.4)",
+    border: "1px solid rgba(6,182,212,0.3)",
+    borderRadius: "8px",
+    cursor: "pointer",
+  },
+  segmentActive: {
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    borderColor: "transparent",
     color: "white",
   },
-  checkbox: {
-    width: "14px",
-    height: "14px",
-    cursor: "pointer",
-    accentColor: "#06b6d4",
-    flexShrink: 0,
-  },
   errorText: { color: "#fca5a5", fontSize: "14px", margin: 0 },
+  footerBar: {
+    flex: "0 0 auto",
+    padding: "10px 16px max(12px, env(safe-area-inset-bottom))",
+    background: "#10224f",
+    borderTop: "1px solid rgba(6,182,212,0.3)",
+    boxShadow: "0 -6px 18px rgba(0,0,0,0.3)",
+  },
+  footerInner: {
+    maxWidth: "600px",
+    margin: "0 auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    alignItems: "stretch",
+  },
+  matchText: { margin: 0, textAlign: "center", color: "#bfdbfe", fontSize: "13px", fontWeight: "600" },
   primaryButton: {
     padding: "14px 24px",
     fontSize: "16px",
@@ -895,6 +1677,7 @@ const styles = {
     maxWidth: "450px",
     alignSelf: "center",
   },
+  loadingText: { fontSize: "clamp(20px, 5vw, 28px)", color: "white", margin: "0", fontWeight: "700" },
 
   // ---------- Game top bar ----------
   hud: {
@@ -920,20 +1703,25 @@ const styles = {
     textShadow: "0 2px 12px rgba(251,191,36,0.35)",
     fontVariantNumeric: "tabular-nums",
   },
-  scoreCompact: {
-    fontSize: "22px",
-    fontWeight: "800",
-    color: "#fbbf24",
-    lineHeight: 1,
-    fontVariantNumeric: "tabular-nums",
-  },
+  scoreCompact: { fontSize: "22px", fontWeight: "800", color: "#fbbf24", lineHeight: 1, fontVariantNumeric: "tabular-nums" },
   scoreLabel: { fontSize: "13px", color: "#93c5fd", fontWeight: "600" },
+  chipRow: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" },
   pillBlue: {
     fontSize: "13px",
     fontWeight: "700",
     color: "#93c5fd",
     background: "rgba(59,130,246,0.16)",
     border: "1px solid rgba(59,130,246,0.4)",
+    borderRadius: "999px",
+    padding: "2px 9px",
+    whiteSpace: "nowrap",
+  },
+  pillOrange: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#fdba74",
+    background: "rgba(249,115,22,0.18)",
+    border: "1px solid rgba(249,115,22,0.4)",
     borderRadius: "999px",
     padding: "2px 9px",
     whiteSpace: "nowrap",
@@ -948,12 +1736,7 @@ const styles = {
   // ---------- Question ----------
   questionContainer: { textAlign: "center", padding: "16px 20px 0", marginBottom: "16px" },
   questionLabel: { fontSize: "13px", color: "#93c5fd", margin: "0 0 6px 0", fontWeight: "600" },
-  questionText: {
-    fontSize: "clamp(13px, 3vw, 14px)",
-    color: "#bfdbfe",
-    margin: "0 0 8px 0",
-    fontWeight: "500",
-  },
+  questionText: { fontSize: "clamp(13px, 3vw, 14px)", color: "#bfdbfe", margin: "0 0 8px 0", fontWeight: "500" },
   wordToTranslate: {
     fontSize: "clamp(28px, 7vw, 40px)",
     color: "white",
@@ -966,26 +1749,22 @@ const styles = {
     border: "1px solid rgba(6,182,212,0.3)",
     borderRadius: "10px",
     padding: "14px 16px",
-    margin: "0 20px 16px",
+    margin: "0 16px 16px",
+    maxWidth: "600px",
+    boxSizing: "border-box",
+    alignSelf: "center",
+    width: "calc(100% - 32px)",
   },
-  exampleNL: {
-    color: "#bfdbfe",
-    margin: "0 0 8px 0",
-    fontSize: "clamp(15px, 4vw, 17px)",
-    lineHeight: 1.45,
-  },
-  exampleEN: {
-    color: "#cbd5e1",
-    margin: "0",
-    fontSize: "clamp(14px, 3.6vw, 16px)",
-    lineHeight: 1.45,
-  },
+  exampleNL: { color: "#bfdbfe", margin: "0 0 8px 0", fontSize: "clamp(15px, 4vw, 17px)", lineHeight: 1.45 },
+  exampleEN: { color: "#cbd5e1", margin: "0", fontSize: "clamp(14px, 3.6vw, 16px)", lineHeight: 1.45 },
   form: {
     display: "flex",
     gap: "8px",
     padding: "0 16px 12px",
     boxSizing: "border-box",
     width: "100%",
+    maxWidth: "600px",
+    alignSelf: "center",
   },
   input: {
     padding: "10px 12px",
@@ -997,13 +1776,7 @@ const styles = {
     boxSizing: "border-box",
     background: "rgba(255,255,255,0.95)",
     color: "#0f172a",
-    transition: "all 0.2s ease",
     fontFamily: "inherit",
-  },
-  inputCorrect: {
-    borderColor: "#22c55e",
-    boxShadow: "0 0 0 3px rgba(34,197,94,0.4)",
-    background: "#ecfdf5",
   },
   submitButton: {
     padding: "10px 16px",
@@ -1018,37 +1791,30 @@ const styles = {
     whiteSpace: "nowrap",
     flexShrink: 0,
   },
-  feedbackCorrect: {
-    fontSize: "clamp(14px, 3vw, 15px)",
-    fontWeight: "700",
-    margin: "8px 20px 0",
-    textAlign: "center",
-    color: "#10b981",
+  saveWarning: {
+    margin: "0 16px 12px", padding: "8px 10px", borderRadius: "10px", fontSize: "12px", textAlign: "left",
+    color: "#fde68a", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.4)",
+    overflowWrap: "anywhere", alignSelf: "center", maxWidth: "568px", boxSizing: "border-box",
   },
 
   // ---------- Finished screen ----------
-  gameOverContainer: {
+  finishContainer: {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
-    padding: "20px",
+    padding: "max(24px, env(safe-area-inset-top)) 16px 32px",
+    boxSizing: "border-box",
     fontFamily: FONT,
   },
-  gameOverTitle: {
-    fontSize: "clamp(26px, 6vw, 36px)",
-    color: "white",
-    margin: "8px 0 24px 0",
-    textAlign: "center",
-  },
+  finishTitle: { fontSize: "clamp(26px, 6vw, 36px)", color: "white", margin: "8px 0 20px", textAlign: "center" },
   statsGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(2, 1fr)",
     gap: "12px",
     maxWidth: "400px",
-    margin: "0 auto 24px",
+    margin: "0 auto 16px",
     width: "100%",
   },
   statCard: {
@@ -1070,6 +1836,7 @@ const styles = {
     textTransform: "uppercase",
     fontWeight: "600",
   },
+  saveStatus: { textAlign: "center", fontSize: "13px", fontWeight: "600", margin: "0 0 14px" },
   buttonContainer: {
     display: "flex",
     flexDirection: "column",
@@ -1077,30 +1844,58 @@ const styles = {
     maxWidth: "450px",
     width: "100%",
     alignItems: "center",
+    marginBottom: "20px",
   },
-
-  // ---------- Loading ----------
-  loadingContainer: {
-    minHeight: "100vh",
+  listSection: {
+    background: "rgba(30, 58, 138, 0.6)",
+    border: "1px solid rgba(239, 68, 68, 0.3)",
+    borderRadius: "10px",
+    padding: "14px",
+    maxWidth: "450px",
+    margin: "0 auto 16px",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  listTitle: { fontSize: "14px", color: "#fca5a5", margin: "0 0 12px 0", fontWeight: "600" },
+  listRows: { display: "flex", flexDirection: "column", gap: "8px" },
+  listRow: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-    fontFamily: FONT,
-    padding: "20px",
+    gap: "2px",
+    padding: "10px",
+    background: "rgba(30, 58, 138, 0.8)",
+    borderRadius: "6px",
+    border: "1px solid rgba(6,182,212,0.2)",
   },
-  loadingText: { fontSize: "clamp(20px, 5vw, 28px)", color: "white", margin: "0", fontWeight: "700" },
-  loadingSubtext: {
-    fontSize: "clamp(14px, 3vw, 16px)",
-    color: "#bfdbfe",
-    margin: "12px 0 24px 0",
-    textAlign: "center",
-    maxWidth: "320px",
-    lineHeight: 1.5,
-  },
+  listEnglish: { fontWeight: "600", color: "white", fontSize: "13px" },
+  listDutch: { color: "#93c5fd", fontSize: "12px" },
 
-  // ---------- Pop-ups (same look as Play) ----------
+  // ---------- Correct pop-up (same as Review) ----------
+  correctOverlay: {
+    position: "fixed", inset: 0, zIndex: 900, display: "flex", alignItems: "center", justifyContent: "center",
+    padding: "18px", background: "rgba(2, 6, 23, 0.55)", cursor: "pointer", fontFamily: FONT,
+  },
+  correctCard: {
+    width: "100%", maxWidth: "320px", boxSizing: "border-box", padding: "22px 20px 16px", borderRadius: "24px",
+    textAlign: "center", color: "#f8fafc", background: "linear-gradient(160deg, #134e4a 0%, #172554 100%)",
+    border: "1px solid rgba(52,211,153,0.6)", boxShadow: "0 20px 60px rgba(0,0,0,0.45), 0 0 30px rgba(52,211,153,0.2)",
+    animation: "pCardPop 0.35s ease-out",
+  },
+  correctBadge: {
+    width: "46px", height: "46px", margin: "0 auto 8px", borderRadius: "50%", display: "flex", alignItems: "center",
+    justifyContent: "center", background: "rgba(16,185,129,0.18)", border: "2px solid #34d399", color: "#6ee7b7",
+    fontSize: "24px", fontWeight: 900,
+  },
+  correctTitle: { margin: "0 0 6px", fontSize: "24px", fontWeight: 850, lineHeight: 1.2 },
+  correctWords: { margin: "0 0 14px", color: "#cbd5e1", fontSize: "15px", overflowWrap: "anywhere" },
+  correctTimerTrack: { height: "4px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", overflow: "hidden" },
+  correctTimerFill: {
+    height: "100%", background: "linear-gradient(90deg, #34d399, #06b6d4)", transformOrigin: "left center",
+    animationName: "pTimerShrink", animationTimingFunction: "linear", animationFillMode: "forwards",
+  },
+  correctHint: { margin: "8px 0 0", fontSize: "11px", color: "#94a3b8" },
+
+  // ---------- Modals (wrong / mastered / new word / milestone / notice) ----------
   overlay: {
     position: "fixed",
     inset: 0,
@@ -1140,17 +1935,22 @@ const styles = {
     fontSize: "24px",
     fontWeight: 900,
   },
-  bigEmoji: { fontSize: "64px", lineHeight: 1, margin: "0 auto 8px", animation: "pPop 0.7s ease-out" },
+  bigEmoji: { fontSize: "64px", lineHeight: 1, margin: "0 auto 8px", textAlign: "center", animation: "pPop 0.7s ease-out" },
   wrongEyebrow: { margin: "0 0 5px", color: "#fca5a5", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
   masteredEyebrow: { margin: "0 0 5px", color: "#fcd34d", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
-  modalTitle: { margin: "0 0 12px", fontSize: "24px", lineHeight: 1.2, fontWeight: 850 },
-  modalText: { margin: "0 0 20px", color: "#cbd5e1", fontSize: "15px", lineHeight: 1.5 },
+  newWordEyebrow: { margin: "0 0 5px", color: "#fcd34d", fontSize: "12px", fontWeight: 900, letterSpacing: "2px" },
+  newWordBox: {
+    display: "flex", flexDirection: "column", gap: "7px", padding: "17px 14px", borderRadius: "16px",
+    background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.55)",
+  },
+  newWordLabel: { color: "#fcd34d", fontSize: "11px", fontWeight: 900, letterSpacing: "1.5px" },
+  newWordEnglish: { color: "#fffbeb", fontSize: "clamp(24px, 7vw, 32px)", overflowWrap: "anywhere", lineHeight: 1.2 },
+  cardTitle: { margin: "0 0 12px", fontSize: "24px", lineHeight: 1.2, fontWeight: 850 },
   cardEnglish: { margin: "0 0 14px", fontSize: "17px", color: "#cbd5e1" },
-  cardNote: {
-    margin: "14px 0 18px",
-    color: "#cbd5e1",
-    fontSize: "14px",
-    lineHeight: 1.5,
+  cardNote: { margin: "14px 0 18px", color: "#cbd5e1", fontSize: "14px", lineHeight: 1.5, overflowWrap: "anywhere" },
+  mistakeWarning: {
+    margin: "0 0 14px", padding: "8px 10px", borderRadius: "10px", fontSize: "12px", textAlign: "left",
+    color: "#fde68a", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.4)",
     overflowWrap: "anywhere",
   },
   correctAnswerBox: {
@@ -1163,12 +1963,9 @@ const styles = {
     border: "1px solid rgba(52,211,153,0.55)",
   },
   correctAnswerLabel: { color: "#6ee7b7", fontSize: "11px", fontWeight: 900, letterSpacing: "1.5px" },
-  correctAnswerDutch: {
-    color: "#ecfdf5",
-    fontSize: "clamp(24px, 7vw, 32px)",
-    overflowWrap: "anywhere",
-    lineHeight: 1.2,
-  },
+  correctAnswerDutch: { color: "#ecfdf5", fontSize: "clamp(24px, 7vw, 32px)", overflowWrap: "anywhere", lineHeight: 1.2 },
+  modalTitle: { margin: "0 0 8px", fontSize: "22px", lineHeight: 1.2, fontWeight: 850 },
+  modalText: { margin: "0 0 20px", color: "#cbd5e1", fontSize: "15px", lineHeight: 1.5 },
   modalPrimaryButton: {
     width: "100%",
     border: 0,
@@ -1181,6 +1978,67 @@ const styles = {
     fontFamily: "inherit",
     cursor: "pointer",
     boxShadow: "0 8px 22px rgba(16,185,129,0.2)",
+  },
+  reportLinkButton: {
+    display: "block",
+    margin: "12px auto 0",
+    padding: "10px 12px",
+    border: "1px solid rgba(148,163,184,0.35)",
+    borderRadius: "10px",
+    color: "#cbd5e1",
+    background: "transparent",
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  reportTitle: { margin: "0 0 8px", fontSize: "20px", fontWeight: 850 },
+  reportWord: { margin: "0 0 14px", color: "#bfdbfe", fontSize: "15px" },
+  formLabel: { display: "block", marginBottom: "6px", fontSize: "13px", color: "#bfdbfe", fontWeight: "600" },
+  reportInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "10px 12px",
+    fontSize: "16px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "7px",
+    background: "#ffffff",
+    color: "#111827",
+    fontFamily: "inherit",
+    colorScheme: "light",
+  },
+  reportTextarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "10px",
+    minHeight: "88px",
+    borderRadius: "7px",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    font: "inherit",
+    fontSize: "16px",
+    resize: "vertical",
+    color: "#111827",
+    caretColor: "#111827",
+    colorScheme: "light",
+  },
+  reportActions: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" },
+  reportCancelButton: {
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "1px solid #64748b",
+    color: "white",
+    background: "transparent",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  reportSubmitButton: {
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "none",
+    color: "white",
+    background: "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+    fontWeight: "700",
+    fontFamily: "inherit",
   },
 };
 
